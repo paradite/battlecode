@@ -1,4 +1,4 @@
-package zzp1;
+package team106;
 
 import battlecode.common.*;
 import java.util.*;
