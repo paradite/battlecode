@@ -249,17 +249,36 @@ public class RobotPlayer {
             return null;
         }
 
+        private void transferSupplies() throws GameActionException {
+            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(GameConstants.SUPPLY_TRANSFER_RADIUS_SQUARED,myTeam);
+            double lowerestSupply = rc.getSupplyLevel();
+            double transferAmount = 0;
+            MapLocation transferLocation = null;
+            for(RobotInfo m:nearbyAllies){
+                if(m.supplyLevel < lowerestSupply){
+                    lowerestSupply = m.supplyLevel;
+                    transferAmount = (rc.getSupplyLevel() - m.supplyLevel)/2;
+                    transferLocation = m.location;
+                }
+            }
+            if(transferLocation != null && transferAmount > 0){
+                rc.transferSupplies((int) transferAmount, transferLocation);
+            }
+        }
+
         public void beginningOfTurn() {
             if (rc.senseEnemyHQLocation() != null) {
                 this.theirHQ = rc.senseEnemyHQLocation();
             }
         }
 
-        public void endOfTurn() {
+        public void endOfTurn() throws GameActionException {
+
         }
 
         public void go() throws GameActionException {
             beginningOfTurn();
+            transferSupplies();
             execute();
             endOfTurn();
         }
@@ -322,7 +341,11 @@ public class RobotPlayer {
             }else if(Clock.getRoundNum() < TankBuildTurn){
                 tryBuild(RobotType.BARRACKS);
             }else if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
-                tryBuild(RobotType.TANKFACTORY);
+                if(Clock.getRoundNum()%2 == 0){
+                    tryBuild(RobotType.TANKFACTORY);
+                }else{
+                    tryBuild(RobotType.SUPPLYDEPOT);
+                }
             }
             mineOrMove();
             rc.yield();
@@ -366,7 +389,21 @@ public class RobotPlayer {
 
         public void execute() throws GameActionException {
             autoAttack();
-            mineOrMove();
+            if(Clock.getRoundNum() < ChargeTurn){
+                mineOrMove();
+            }else {
+                if (rc.isCoreReady()) {
+                    int rallyX = rc.readBroadcast(0);
+                    int rallyY = rc.readBroadcast(1);
+                    MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
+                    Direction newDir = getMoveDir(rallyPoint);
+                    if (newDir != null) {
+                        rc.move(newDir);
+                    }else{
+                        moveRandom();
+                    }
+                }
+            }
             rc.yield();
         }
     }
