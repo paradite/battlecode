@@ -19,6 +19,7 @@ public class RobotPlayer {
 
     final static int MinerNumChannel = 3;
     final static int BeaverNumChannel = 2;
+    final static int BarracksNumChannel = 5;
     final static int StrategyNumChannel = 100;
 
     public static void run(RobotController rc) {
@@ -500,7 +501,14 @@ public class RobotPlayer {
             if(Clock.getRoundNum() < StopMinerFactoryBuildTurn){
                 tryBuild(RobotType.MINERFACTORY);
             }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
-                tryBuild(RobotType.BARRACKS);
+                int barrack_num = rc.readBroadcast(BarracksNumChannel);
+                //Limit the number of barracks
+                if(barrack_num < 3){
+                    boolean built = tryBuild(RobotType.BARRACKS);
+                    if(built){
+                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
+                    }
+                }
             }else {
             	executeStrategy(strategy);
             }
