@@ -143,7 +143,11 @@ public class RobotPlayer {
             double minEnergon = Double.MAX_VALUE;
             MapLocation toAttack = null;
             for (RobotInfo info : enemies) {
-                if (info.health < minEnergon) {
+                //Add attacking of HQ as priority
+                if(info.type == RobotType.HQ){
+                    toAttack = info.location;
+                    break;
+                }else if (info.health < minEnergon) {
                     toAttack = info.location;
                     minEnergon = info.health;
                 }
@@ -540,9 +544,9 @@ public class RobotPlayer {
 	                if(nearestTower != null){
 
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-                        //Attack HQ directly if we do not have enough combat units to take down any towers
-                        if(combatUnitNum < smallCombatUnitNum){
-                            rallyPoint = this.theirHQ;
+                        //Defend own HQ if we do not have enough combat units to take down any towers
+                        if(combatUnitNum < smallCombatUnitNum && Clock.getRoundNum() > LastAttackTurn){
+                            rallyPoint = this.myHQ;
                         }
                         //Only charge when we have enough combat units
                         //Or the game is ending soon
