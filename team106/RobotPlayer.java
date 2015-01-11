@@ -31,6 +31,7 @@ public class RobotPlayer {
     final static int CombatUnitNumChannel = 98;
     final static int tooManyUnits = 5;
     final static int largeCombatUnitNum = 99;
+    final static int smallCombatUnitNum = 60;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -113,6 +114,10 @@ public class RobotPlayer {
         public Direction getBuildDirection(RobotType type) {
             Direction[] dirs = getDirectionsToward(this.theirHQ);
             for (Direction d : dirs) {
+                //Avoid building near the wall
+                if(rc.senseTerrainTile(rc.getLocation().add(d).add(d)) != TerrainTile.NORMAL){
+                    return null;
+                }
                 if (rc.canBuild(d, type)) {
                     return d;
                 }
@@ -161,7 +166,7 @@ public class RobotPlayer {
 
         public boolean tryBuild(RobotType type) throws GameActionException {
             int closeDistance = rc.readBroadcast(CloseDistanceChannel);
-            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
+            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance, myTeam);
             boolean buildingClash = false;
             //Avoid building minefactory together
             if(type == RobotType.MINERFACTORY){
@@ -195,20 +200,14 @@ public class RobotPlayer {
         public void mineOrMove() throws GameActionException {
             //Avoid concentrating around the HQ, encourage going further away
             if(rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
-                if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine() && rand.nextInt(10) < 2){
+                if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>15 && rc.canMine() && rand.nextInt(10) < 2){
                     rc.mine();
                 }else{
                     moveRandom();
                 }
             }
-            else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine()){
+            else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>15 && rc.canMine()){
                 if (rand.nextInt(10) < 9) {
-                    rc.mine();
-                } else {
-                    moveRandom();
-                }
-            }else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>10 && rc.canMine()){
-                if (rand.nextInt(10) < 8) {
                     rc.mine();
                 } else {
                     moveRandom();
@@ -430,7 +429,7 @@ public class RobotPlayer {
             System.out.println("x range: " + (xMax - xMin));
             System.out.println("y range: " + (yMax - yMin));
             System.out.println("map size: " + mapSize);
-            CloseDistance = (mapSize / 5) * (mapSize / 5);
+            CloseDistance = (mapSize / 6) * (mapSize / 6);
             System.out.println("CloseDistance: " + CloseDistance);
         }
 
@@ -539,10 +538,15 @@ public class RobotPlayer {
             	} else {
 	                MapLocation nearestTower = getNearestTower();
 	                if(nearestTower != null){
+
+                        int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+                        //Attack HQ directly if we do not have enough combat units to take down any towers
+                        if(combatUnitNum < smallCombatUnitNum){
+                            rallyPoint = this.theirHQ;
+                        }
                         //Only charge when we have enough combat units
                         //Or the game is ending soon
-                        int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-                        if(combatUnitNum > largeCombatUnitNum || Clock.getRoundNum() > LastAttackTurn){
+                        else if(combatUnitNum > largeCombatUnitNum || Clock.getRoundNum() > LastAttackTurn){
                             rallyPoint = nearestTower;
                         }else{
                             rallyPoint = closestTowerToEnemy;
