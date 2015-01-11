@@ -1,13 +1,15 @@
 package team106;
 
 import battlecode.common.*;
+
 import java.util.*;
 
 public class RobotPlayer {
     static int ChargeTurn = 1300;
-    private static int TankBuildTurn = 600;
+    private static int ExecuteStrategyTurn = 600;
     private static int StopMinerFactoryBuildTurn = 500;
     private static int StopMinerSpawnTurn = 800;
+    private static int SpawnCommanderTurn = 850;
     private static int MaxMiner = 80;
     static Random rand;
     static Direction facing;
@@ -17,6 +19,7 @@ public class RobotPlayer {
 
     final static int MinerNumChannel = 3;
     final static int BeaverNumChannel = 2;
+    final static int StrategyNumChannel = 100;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -28,18 +31,15 @@ public class RobotPlayer {
             myself = new Beaver(rc);
         } else if (rc.getType() == RobotType.MINER) {
             myself = new Miner(rc);
-        } else if (rc.getType() == RobotType.BARRACKS) {
-            myself = new Barracks(rc);
-        } else if (rc.getType() == RobotType.SOLDIER) {
-            myself = new Soldier(rc);
+        } else if (rc.getType() == RobotType.BARRACKS || rc.getType() == RobotType.HELIPAD || 
+        		rc.getType() == RobotType.TANKFACTORY || rc.getType() == RobotType.MINERFACTORY || 
+        		rc.getType() == RobotType.TRAININGFIELD || rc.getType() == RobotType.TECHNOLOGYINSTITUTE) {
+            myself = new SimpleBuilding(rc);
+        } else if (rc.getType() == RobotType.SOLDIER || rc.getType() == RobotType.DRONE || 
+        		rc.getType() == RobotType.TANK || rc.getType() == RobotType.COMMANDER) {
+            myself = new SimpleFighter(rc);
         } else if (rc.getType() == RobotType.TOWER) {
             myself = new Tower(rc);
-        } else if (rc.getType() == RobotType.MINERFACTORY) {
-            myself = new MinerFactory(rc);
-        } else if (rc.getType() == RobotType.TANKFACTORY) {
-            myself = new TankFactory(rc);
-        } else if (rc.getType() == RobotType.TANK) {
-            myself = new Tank(rc);
         } else {
             myself = new BaseBot(rc);
         }
@@ -142,16 +142,7 @@ public class RobotPlayer {
             }
         }
 
-        public boolean trySpawn(RobotType type) throws GameActionException {
-            if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
-                Direction newDir = getSpawnDirection(type);
-                if (newDir != null) {
-                    rc.spawn(newDir, type);
-                    return true;
-                }
-            }
-            return false;
-        }
+       
 
         public boolean tryBuild(RobotType type) throws GameActionException {
             if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
@@ -287,13 +278,157 @@ public class RobotPlayer {
             rc.yield();
         }
     }
+    public static class SimpleBuilding extends BaseBot {
+        public SimpleBuilding(RobotController rc) {
+            super(rc);
+        }
 
+        public void execute() throws GameActionException {
+            RobotType toSpawn = null;
+
+            if (rc.getType() == RobotType.BARRACKS) new Barracks(rc).execute();
+            else if (rc.getType() == RobotType.HELIPAD) toSpawn = RobotType.DRONE;
+            else if (rc.getType() == RobotType.TANKFACTORY) toSpawn = RobotType.TANK;
+            else if (rc.getType() == RobotType.TRAININGFIELD) toSpawn = RobotType.COMMANDER;
+            else if (rc.getType() == RobotType.MINERFACTORY)  new MinerFactory(rc).execute();
+            
+            if (toSpawn != null && rc.isCoreReady() && rc.getTeamOre() > toSpawn.oreCost && (rc.readBroadcast(100) != 0 || rc.getType() == RobotType.TANKFACTORY)) {
+                Direction newDir = getSpawnDirection(toSpawn);
+                if (newDir != null) {
+                    rc.spawn(newDir, toSpawn);
+                }
+            }
+
+            rc.yield();
+        }
+        
+        public boolean trySpawn(RobotType type) throws GameActionException {
+            if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
+                Direction newDir = getSpawnDirection(type);
+                if (newDir != null) {
+                    rc.spawn(newDir, type);
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    public static class SimpleFighter extends BaseBot {
+        public SimpleFighter(RobotController rc) {
+            super(rc);
+        }
+
+        public void execute() throws GameActionException {
+        	  autoAttack();
+              if (rc.isCoreReady()) {
+                  int rallyX = rc.readBroadcast(0);
+                  int rallyY = rc.readBroadcast(1);
+                  MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
+            
+                  Direction newDir = getMoveDir(rallyPoint);
+                  if (newDir != null) {
+                      rc.move(newDir);
+                  }else{
+                      moveRandom();
+                  }
+              }
+             
+            rc.yield();
+        }
+    }
+
+    
     /**
      * HQ
      */
-    public static class HQ extends BaseBot {
-        public HQ(RobotController rc) {
+    public static class HQ extends SimpleBuilding {
+    	public static int xMin, xMax, yMin, yMax;
+        public static int xPos, yPos;
+        public static int totalNormal, totalProcessed;
+        public static int towerThreat;
+        public static boolean isFinished;
+        
+        public static int strategy; //0 is defend, 1 is attack (with tanks), 2 is attack (with drones)
+        
+        public static double mapRatio;
+        
+    	public HQ(RobotController rc) {
             super(rc);
+            
+            xPos = xMin = Math.min(this.myHQ.x, this.theirHQ.x);
+            xMax = Math.max(this.myHQ.x, this.theirHQ.x);
+            yPos = yMin = Math.min(this.myHQ.y, this.theirHQ.y);
+            yMax = Math.max(this.myHQ.y, this.theirHQ.y);
+            
+            towerThreat = totalNormal = totalProcessed = 0;
+            isFinished = false;
+        }
+        
+    	public void chooseStrategy() throws GameActionException{
+    		System.out.println("TowerThreat: "+towerThreat);
+    		System.out.println("mapRatio: "+mapRatio);
+    		
+    		if(mapRatio < 0.92){
+    			//too many void squares, build drones to attack
+    			strategy = 2;
+    		} else{
+    			//default strategy, attack with tanks
+    			strategy = 1;
+    		}
+    		System.out.println("Strategy Chosen: "+strategy);
+    		rc.broadcast(StrategyNumChannel, strategy);
+    	}
+    	
+        public void analyseMap() throws GameActionException{
+        	while(yPos <= yMax){
+    			TerrainTile t = rc.senseTerrainTile(new MapLocation(xPos, yPos));
+    			if(t == TerrainTile.NORMAL){
+    				totalNormal++;
+    				totalProcessed++;
+    			} else if(t == TerrainTile.VOID){
+    				totalProcessed++;
+    			}
+    			
+    			if(Clock.getBytecodesLeft() < 100){
+    				return;
+    			}
+    			xPos++;
+    			if(xPos == xMax + 1){
+    				xPos = xMin;
+    				yPos++;
+    			}
+        	}
+        	//int totalProcessed = (xMax - xMin + 1)*(yMax - yMin + 1);
+        	mapRatio = (double)totalNormal/totalProcessed;
+        	
+        	isFinished = analyseTowers();
+        	if(isFinished){
+        		chooseStrategy();
+        	}
+        }
+        
+        public boolean analyseTowers(){
+        	if(Clock.getBytecodesLeft() < 1000){
+				return false;
+			}
+        	MapLocation[] towers = rc.senseEnemyTowerLocations();
+            towerThreat = 0;
+
+            for (int i=0; i<towers.length; ++i) {
+                MapLocation towerLoc = towers[i];
+
+                if ((xMin <= towerLoc.x && towerLoc.x <= xMax && yMin <= towerLoc.y && towerLoc.y <= yMax) || towerLoc.distanceSquaredTo(this.theirHQ) <= 50) {
+                    for (int j=0; j<towers.length; ++j) {
+                        if (towers[j].distanceSquaredTo(towerLoc) <= 50) {
+                            towerThreat++;
+                        }
+                    }
+                }
+            }
+
+        	return true;
+        	
         }
 
         public void execute() throws GameActionException {
@@ -309,18 +444,42 @@ public class RobotPlayer {
             if (Clock.getRoundNum() < ChargeTurn) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
+                MapLocation[] myTowers = rc.senseTowerLocations();
+                MapLocation closestTowerToEnemy = null;
+                int closest = 900000;
+	            for(MapLocation m:myTowers){
+	            	if(m.distanceSquaredTo(theirHQ) <= closest){
+	            		closest = m.distanceSquaredTo(theirHQ);
+	            		closestTowerToEnemy = m;
+	            	}
+	            }
+	            rallyPoint = closestTowerToEnemy;
             }
             else {
-                MapLocation nearestTower = getNearestTower();
-                if(nearestTower != null){
-                    rallyPoint = nearestTower;
-                }else{
-                    rallyPoint = this.theirHQ;
-                }
+            	if(strategy == 0){
+            		//TODO: come up with defensive strategy
+            		MapLocation nearestTower = getNearestTower();
+ 	                if(nearestTower != null){
+ 	                    rallyPoint = nearestTower;
+ 	                }else{
+ 	                    rallyPoint = this.theirHQ;
+ 	                }
+            	} else {
+	                MapLocation nearestTower = getNearestTower();
+	                if(nearestTower != null){
+	                    rallyPoint = nearestTower;
+	                }else{
+	                    rallyPoint = this.theirHQ;
+	                }
+            	}
             }
             rc.broadcast(0, rallyPoint.x);
             rc.broadcast(1, rallyPoint.y);
-
+            
+            if(!isFinished){
+            	analyseMap();
+            }
+            
             rc.yield();
         }
     }
@@ -335,27 +494,67 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
+        	int strategy = rc.readBroadcast(100);
+        	
             autoAttack();
             if(Clock.getRoundNum() < StopMinerFactoryBuildTurn){
                 tryBuild(RobotType.MINERFACTORY);
-            }else if(Clock.getRoundNum() < TankBuildTurn){
+            }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
                 tryBuild(RobotType.BARRACKS);
-            }else if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
-                if(Clock.getRoundNum()%2 == 0){
-                    tryBuild(RobotType.TANKFACTORY);
-                }else{
-                    tryBuild(RobotType.SUPPLYDEPOT);
-                }
+            }else {
+            	executeStrategy(strategy);
             }
             mineOrMove();
             rc.yield();
+        }
+        
+        public void executeStrategy(int strategy) throws GameActionException{
+        	if(Clock.getRoundNum() >= SpawnCommanderTurn){
+        		if(rc.checkDependencyProgress(RobotType.TECHNOLOGYINSTITUTE) == DependencyProgress.NONE){
+	          		if(rc.getTeamOre() > RobotType.TECHNOLOGYINSTITUTE.oreCost*1.1){
+	        			tryBuild(RobotType.TECHNOLOGYINSTITUTE);
+	        		}
+        		} else if (rc.checkDependencyProgress(RobotType.TRAININGFIELD) == DependencyProgress.NONE){
+        			if(rc.getTeamOre() > RobotType.TRAININGFIELD.oreCost*1.1){
+	        			tryBuild(RobotType.TRAININGFIELD);
+	        		}
+        		}
+        	}
+        		
+        	else{
+	        	switch (strategy){
+	        	case 0:
+	        	case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
+	                		if(Clock.getRoundNum()%2 == 0){
+			                    tryBuild(RobotType.TANKFACTORY);
+			                }else{
+			                    tryBuild(RobotType.SUPPLYDEPOT);
+			                }
+			          	}
+	        			break;
+	        	case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.5){
+			        		if(Clock.getRoundNum()%2 == 0){
+			                    tryBuild(RobotType.HELIPAD);
+			                }else{
+			                    tryBuild(RobotType.SUPPLYDEPOT);
+			                }
+			          	}
+	        			break;
+	        	default:if(Clock.getRoundNum()%2 == 0){
+			                tryBuild(RobotType.BARRACKS);
+			            }else{
+			                tryBuild(RobotType.SUPPLYDEPOT);
+			            }
+				      	break;
+	        	}
+        	}
         }
     }
 
     /**
      * MINER FACTORY
      */
-    private static class MinerFactory extends BaseBot {
+    private static class MinerFactory extends SimpleBuilding {
         public MinerFactory(RobotController rc) {
             super(rc);
         }
@@ -389,21 +588,8 @@ public class RobotPlayer {
 
         public void execute() throws GameActionException {
             autoAttack();
-            if(Clock.getRoundNum() < ChargeTurn){
-                mineOrMove();
-            }else {
-                if (rc.isCoreReady()) {
-                    int rallyX = rc.readBroadcast(0);
-                    int rallyY = rc.readBroadcast(1);
-                    MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                    Direction newDir = getMoveDir(rallyPoint);
-                    if (newDir != null) {
-                        rc.move(newDir);
-                    }else{
-                        moveRandom();
-                    }
-                }
-            }
+            mineOrMove();
+            
             rc.yield();
         }
     }
@@ -411,13 +597,13 @@ public class RobotPlayer {
     /**
      * BARRACKS
      */
-    public static class Barracks extends BaseBot {
+    public static class Barracks extends SimpleBuilding {
         public Barracks(RobotController rc) {
             super(rc);
         }
 
         public void execute() throws GameActionException {
-            if(Clock.getRoundNum() < TankBuildTurn){
+            if(Clock.getRoundNum() < ExecuteStrategyTurn){
                 trySpawn(RobotType.SOLDIER);
             }else{
                 if(rc.getTeamOre()>RobotType.TANKFACTORY.oreCost*1.1){
@@ -428,69 +614,6 @@ public class RobotPlayer {
         }
     }
 
-    /**
-     * TANK FACTORY
-     */
-    public static class TankFactory extends BaseBot {
-        public TankFactory(RobotController rc) {
-            super(rc);
-        }
-
-        public void execute() throws GameActionException {
-            trySpawn(RobotType.TANK);
-            rc.yield();
-        }
-    }
-
-    /**
-     * SOLDIER
-     */
-    public static class Soldier extends BaseBot {
-        public Soldier(RobotController rc) {
-            super(rc);
-        }
-
-        public void execute() throws GameActionException {
-            autoAttack();
-            if (rc.isCoreReady()) {
-                int rallyX = rc.readBroadcast(0);
-                int rallyY = rc.readBroadcast(1);
-                MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                Direction newDir = getMoveDir(rallyPoint);
-                if (newDir != null) {
-                    rc.move(newDir);
-                }else{
-                    moveRandom();
-                }
-            }
-            rc.yield();
-        }
-    }
-
-    /**
-     * TANK
-     */
-    private static class Tank extends BaseBot {
-        public Tank(RobotController rc) {
-            super(rc);
-        }
-
-        public void execute() throws GameActionException {
-            autoAttack();
-            if (rc.isCoreReady()) {
-                int rallyX = rc.readBroadcast(0);
-                int rallyY = rc.readBroadcast(1);
-                MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                Direction newDir = getMoveDir(rallyPoint);
-                if (newDir != null) {
-                    rc.move(newDir);
-                }else{
-                    moveRandom();
-                }
-            }
-            rc.yield();
-        }
-    }
 
     /**
      * TOWER
