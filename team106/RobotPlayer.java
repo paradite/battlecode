@@ -21,6 +21,8 @@ public class RobotPlayer {
     final static int BeaverNumChannel = 2;
     final static int BarracksNumChannel = 5;
     final static int StrategyNumChannel = 100;
+    final static int CloseDistanceChannel = 99;
+
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -65,6 +67,10 @@ public class RobotPlayer {
             this.theirHQ = rc.senseEnemyHQLocation();
             this.myTeam = rc.getTeam();
             this.theirTeam = this.myTeam.opponent();
+        }
+
+        public MapLocation getMyHQ() {
+            return myHQ;
         }
 
         public Direction[] getDirectionsToward(MapLocation dest) {
@@ -146,10 +152,21 @@ public class RobotPlayer {
        
 
         public boolean tryBuild(RobotType type) throws GameActionException {
-            if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
+
+            //Avoid building around the HQ and causing congestion, encourage going further away
+            if(rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
+                if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine() && rand.nextInt(10) < 2){
+                    rc.mine();
+                }else{
+                    moveRandom();
+                }
+            }else if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
                 Direction newDir = getBuildDirection(type);
                 if (newDir != null) {
                     rc.build(newDir, type);
+                    System.out.println("Type: " + type.name());
+                    System.out.println("CloseDistance: " + rc.readBroadcast(CloseDistanceChannel));
+                    System.out.println("distanceToHQ: " + rc.getLocation().distanceSquaredTo(getMyHQ()));
                     return true;
                 }
             }
@@ -157,7 +174,15 @@ public class RobotPlayer {
         }
 
         public void mineOrMove() throws GameActionException {
-            if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine()){
+            //Avoid concentrating around the HQ, encourage going further away
+            if(rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
+                if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine() && rand.nextInt(10) < 2){
+                    rc.mine();
+                }else{
+                    moveRandom();
+                }
+            }
+            else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine()){
                 if (rand.nextInt(10) < 9) {
                     rc.mine();
                 } else {
@@ -353,7 +378,12 @@ public class RobotPlayer {
         public static int strategy; //0 is defend, 1 is attack (with tanks), 2 is attack (with drones)
         
         public static double mapRatio;
-        
+        public static int mapSize;
+
+        //Distance that is too close to HQ, possibly causing congestion
+        //This will be changed based on the size of the map by HQ
+        public static int CloseDistance;
+
     	public HQ(RobotController rc) {
             super(rc);
             
@@ -361,15 +391,20 @@ public class RobotPlayer {
             xMax = Math.max(this.myHQ.x, this.theirHQ.x);
             yPos = yMin = Math.min(this.myHQ.y, this.theirHQ.y);
             yMax = Math.max(this.myHQ.y, this.theirHQ.y);
-            
             towerThreat = totalNormal = totalProcessed = 0;
             isFinished = false;
+            mapSize = Math.max(xMax - xMin,yMax - yMin);
+            System.out.println("x range: " + (xMax - xMin));
+            System.out.println("y range: " + (yMax - yMin));
+            System.out.println("map size: " + mapSize);
+            CloseDistance = (mapSize / 5) * (mapSize / 5);
+            System.out.println("CloseDistance: " + CloseDistance);
         }
-        
+
     	public void chooseStrategy() throws GameActionException{
-    		System.out.println("TowerThreat: "+towerThreat);
-    		System.out.println("mapRatio: "+mapRatio);
-    		
+            System.out.println("TowerThreat: "+towerThreat);
+            System.out.println("mapRatio: "+mapRatio);
+
     		if(mapRatio < 0.92){
     			//too many void squares, build drones to attack
     			strategy = 2;
@@ -433,6 +468,10 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
+
+            //Tell the other units the close distance to HQ
+            //This is used to encourage units to move away from HQ to avoid congestion
+            rc.broadcast(CloseDistanceChannel, CloseDistance);
             int numBeavers = rc.readBroadcast(BeaverNumChannel);
 
             if (numBeavers < 10) {
@@ -518,6 +557,8 @@ public class RobotPlayer {
         
         public void executeStrategy(int strategy) throws GameActionException{
         	if(Clock.getRoundNum() >= SpawnCommanderTurn){
+                //Late game
+                //Build high level units
         		if(rc.checkDependencyProgress(RobotType.TECHNOLOGYINSTITUTE) == DependencyProgress.NONE){
 	          		if(rc.getTeamOre() > RobotType.TECHNOLOGYINSTITUTE.oreCost*1.1){
 	        			tryBuild(RobotType.TECHNOLOGYINSTITUTE);
@@ -527,9 +568,11 @@ public class RobotPlayer {
 	        			tryBuild(RobotType.TRAININGFIELD);
 	        		}
         		}
+                
         	}
         		
         	else{
+                //Early game
 	        	switch (strategy){
 	        	case 0:
 	        	case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
