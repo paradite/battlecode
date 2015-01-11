@@ -22,7 +22,7 @@ public class RobotPlayer {
     final static int BarracksNumChannel = 5;
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
-
+    final static int tooManyUnits = 5;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -152,14 +152,28 @@ public class RobotPlayer {
        
 
         public boolean tryBuild(RobotType type) throws GameActionException {
-
-            //Avoid building around the HQ and causing congestion, encourage going further away
-            if(rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
-                if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>100 && rc.canMine() && rand.nextInt(10) < 2){
-                    rc.mine();
-                }else{
-                    moveRandom();
+            int closeDistance = rc.readBroadcast(CloseDistanceChannel);
+            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
+            boolean buildingClash = false;
+            //Avoid building minefactory together
+            if(type == RobotType.MINERFACTORY){
+                for(RobotInfo m:nearbyAllies){
+                    if(m.type == type){
+                        buildingClash = true;
+                        break;
+                    }
                 }
+            }
+            if(buildingClash){
+                System.out.println("Building clash, don't build");
+                mineOrMove();
+            //Avoid building around the HQ and causing congestion, encourage going further away
+            }else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance){
+                mineOrMove();
+            //Avoid building around too many other units to avoid congestion
+            }else if(nearbyAllies.length > tooManyUnits){
+                System.out.println("Too many units, don't build");
+                mineOrMove();
             }else if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
                 Direction newDir = getBuildDirection(type);
                 if (newDir != null) {
@@ -318,7 +332,7 @@ public class RobotPlayer {
             else if (rc.getType() == RobotType.TRAININGFIELD) toSpawn = RobotType.COMMANDER;
             else if (rc.getType() == RobotType.MINERFACTORY)  new MinerFactory(rc).execute();
             
-            if (toSpawn != null && rc.isCoreReady() && rc.getTeamOre() > toSpawn.oreCost && (rc.readBroadcast(100) != 0 || rc.getType() == RobotType.TANKFACTORY)) {
+            if (toSpawn != null && rc.isCoreReady() && rc.getTeamOre() > toSpawn.oreCost && (rc.readBroadcast(100) != 0)) {
                 Direction newDir = getSpawnDirection(toSpawn);
                 if (newDir != null) {
                     rc.spawn(newDir, toSpawn);
@@ -481,11 +495,11 @@ public class RobotPlayer {
                 }
             }
             MapLocation rallyPoint;
+            MapLocation closestTowerToEnemy = null;
             if (Clock.getRoundNum() < ChargeTurn) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
                 MapLocation[] myTowers = rc.senseTowerLocations();
-                MapLocation closestTowerToEnemy = null;
                 int closest = 900000;
 	            for(MapLocation m:myTowers){
 	            	if(m.distanceSquaredTo(theirHQ) <= closest){
@@ -567,38 +581,43 @@ public class RobotPlayer {
         			if(rc.getTeamOre() > RobotType.TRAININGFIELD.oreCost*1.1){
 	        			tryBuild(RobotType.TRAININGFIELD);
 	        		}
-        		}
-                
+        		} else if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost * 2){
+                    earlyGameBuildings(strategy);
+                }
         	}
         		
         	else{
                 //Early game
-	        	switch (strategy){
-	        	case 0:
-	        	case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
-	                		if(Clock.getRoundNum()%2 == 0){
-			                    tryBuild(RobotType.TANKFACTORY);
-			                }else{
-			                    tryBuild(RobotType.SUPPLYDEPOT);
-			                }
-			          	}
-	        			break;
-	        	case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.5){
-			        		if(Clock.getRoundNum()%2 == 0){
-			                    tryBuild(RobotType.HELIPAD);
-			                }else{
-			                    tryBuild(RobotType.SUPPLYDEPOT);
-			                }
-			          	}
-	        			break;
-	        	default:if(Clock.getRoundNum()%2 == 0){
-			                tryBuild(RobotType.BARRACKS);
-			            }else{
-			                tryBuild(RobotType.SUPPLYDEPOT);
-			            }
-				      	break;
-	        	}
-        	}
+                earlyGameBuildings(strategy);
+            }
+        }
+
+        private void earlyGameBuildings(int strategy) throws GameActionException {
+            switch (strategy){
+            case 0:
+            case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
+                        if(Clock.getRoundNum()%2 == 0){
+                            tryBuild(RobotType.TANKFACTORY);
+                        }else{
+                            tryBuild(RobotType.SUPPLYDEPOT);
+                        }
+                      }
+                    break;
+            case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.5){
+                        if(Clock.getRoundNum()%2 == 0){
+                            tryBuild(RobotType.HELIPAD);
+                        }else{
+                            tryBuild(RobotType.SUPPLYDEPOT);
+                        }
+                      }
+                    break;
+            default:if(Clock.getRoundNum()%2 == 0){
+                        tryBuild(RobotType.BARRACKS);
+                    }else{
+                        tryBuild(RobotType.SUPPLYDEPOT);
+                    }
+                      break;
+            }
         }
     }
 
