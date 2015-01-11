@@ -5,7 +5,13 @@ import battlecode.common.*;
 import java.util.*;
 
 public class RobotPlayer {
+    //The turn to attack if we have enough combat units
     static int ChargeTurn = 1300;
+
+    //The turn to attack even if we don't have enough combat units
+    //Miners also attack in this turn
+    static int LastAttackTurn = 1500;
+
     private static int ExecuteStrategyTurn = 600;
     private static int StopMinerFactoryBuildTurn = 500;
     private static int StopMinerSpawnTurn = 800;
@@ -22,7 +28,9 @@ public class RobotPlayer {
     final static int BarracksNumChannel = 5;
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
+    final static int CombatUnitNumChannel = 98;
     final static int tooManyUnits = 5;
+    final static int largeCombatUnitNum = 99;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -165,21 +173,18 @@ public class RobotPlayer {
                 }
             }
             if(buildingClash){
-                System.out.println("Building clash, don't build");
                 mineOrMove();
             //Avoid building around the HQ and causing congestion, encourage going further away
             }else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance){
                 mineOrMove();
             //Avoid building around too many other units to avoid congestion
             }else if(nearbyAllies.length > tooManyUnits){
-                System.out.println("Too many units, don't build");
                 mineOrMove();
             }else if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
                 Direction newDir = getBuildDirection(type);
                 if (newDir != null) {
                     rc.build(newDir, type);
                     System.out.println("Type: " + type.name());
-                    System.out.println("CloseDistance: " + rc.readBroadcast(CloseDistanceChannel));
                     System.out.println("distanceToHQ: " + rc.getLocation().distanceSquaredTo(getMyHQ()));
                     return true;
                 }
@@ -297,6 +302,21 @@ public class RobotPlayer {
             }
         }
 
+        public void combatUnitActions() throws GameActionException {
+            if (rc.isCoreReady()) {
+                int rallyX = rc.readBroadcast(0);
+                int rallyY = rc.readBroadcast(1);
+                MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
+
+                Direction newDir = getMoveDir(rallyPoint);
+                if (newDir != null) {
+                    rc.move(newDir);
+                }else{
+                    moveRandom();
+                }
+            }
+        }
+
         public void beginningOfTurn() {
             if (rc.senseEnemyHQLocation() != null) {
                 this.theirHQ = rc.senseEnemyHQLocation();
@@ -332,10 +352,18 @@ public class RobotPlayer {
             else if (rc.getType() == RobotType.TRAININGFIELD) toSpawn = RobotType.COMMANDER;
             else if (rc.getType() == RobotType.MINERFACTORY)  new MinerFactory(rc).execute();
             
-            if (toSpawn != null && rc.isCoreReady() && rc.getTeamOre() > toSpawn.oreCost && (rc.readBroadcast(100) != 0)) {
-                Direction newDir = getSpawnDirection(toSpawn);
-                if (newDir != null) {
-                    rc.spawn(newDir, toSpawn);
+            //if (toSpawn != null && rc.isCoreReady() && rc.getTeamOre() > toSpawn.oreCost && (rc.readBroadcast(100) != 0)) {
+            //    Direction newDir = getSpawnDirection(toSpawn);
+            //    if (newDir != null) {
+            //        rc.spawn(newDir, toSpawn);
+            //    }
+            //}
+            if(toSpawn != null){
+                boolean spawned = trySpawn(toSpawn);
+                if(spawned){
+                    //Record the number of combat units spawned
+                    int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+                    rc.broadcast(CombatUnitNumChannel, combatUnitNum + 1);
                 }
             }
 
@@ -360,20 +388,8 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
-        	  autoAttack();
-              if (rc.isCoreReady()) {
-                  int rallyX = rc.readBroadcast(0);
-                  int rallyY = rc.readBroadcast(1);
-                  MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-            
-                  Direction newDir = getMoveDir(rallyPoint);
-                  if (newDir != null) {
-                      rc.move(newDir);
-                  }else{
-                      moveRandom();
-                  }
-              }
-             
+            autoAttack();
+            combatUnitActions();
             rc.yield();
         }
     }
@@ -397,6 +413,9 @@ public class RobotPlayer {
         //Distance that is too close to HQ, possibly causing congestion
         //This will be changed based on the size of the map by HQ
         public static int CloseDistance;
+
+        //Rally point by default
+        MapLocation closestTowerToEnemy = null;
 
     	public HQ(RobotController rc) {
             super(rc);
@@ -495,7 +514,7 @@ public class RobotPlayer {
                 }
             }
             MapLocation rallyPoint;
-            MapLocation closestTowerToEnemy = null;
+
             if (Clock.getRoundNum() < ChargeTurn) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
@@ -508,8 +527,7 @@ public class RobotPlayer {
 	            	}
 	            }
 	            rallyPoint = closestTowerToEnemy;
-            }
-            else {
+            }else {
             	if(strategy == 0){
             		//TODO: come up with defensive strategy
             		MapLocation nearestTower = getNearestTower();
@@ -521,7 +539,14 @@ public class RobotPlayer {
             	} else {
 	                MapLocation nearestTower = getNearestTower();
 	                if(nearestTower != null){
-	                    rallyPoint = nearestTower;
+                        //Only charge when we have enough combat units
+                        //Or the game is ending soon
+                        int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+                        if(combatUnitNum > largeCombatUnitNum || Clock.getRoundNum() > LastAttackTurn){
+                            rallyPoint = nearestTower;
+                        }else{
+                            rallyPoint = closestTowerToEnemy;
+                        }
 	                }else{
 	                    rallyPoint = this.theirHQ;
 	                }
@@ -658,8 +683,11 @@ public class RobotPlayer {
 
         public void execute() throws GameActionException {
             autoAttack();
-            mineOrMove();
-            
+            if(Clock.getRoundNum() > LastAttackTurn){
+                combatUnitActions();
+            }else{
+                mineOrMove();
+            }
             rc.yield();
         }
     }
