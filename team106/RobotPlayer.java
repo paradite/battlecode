@@ -13,10 +13,12 @@ public class RobotPlayer {
     static int LastAttackTurn = 1500;
 
     private static int ExecuteStrategyTurn = 600;
+    private static int StopSoldierSpawnTurn = 700;
     private static int StopMinerFactoryBuildTurn = 500;
     private static int StopMinerSpawnTurn = 800;
     private static int SpawnCommanderTurn = 850;
     private static int MaxMiner = 80;
+    private static int maxBeavers = 15;
     static Random rand;
     static Direction facing;
 
@@ -170,7 +172,7 @@ public class RobotPlayer {
 
         public boolean tryBuild(RobotType type) throws GameActionException {
             int closeDistance = rc.readBroadcast(CloseDistanceChannel);
-            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance, myTeam);
+            RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
             boolean buildingClash = false;
             //Avoid building minefactory together
             if(type == RobotType.MINERFACTORY){
@@ -194,7 +196,6 @@ public class RobotPlayer {
                 if (newDir != null) {
                     rc.build(newDir, type);
                     System.out.println("Type: " + type.name());
-                    System.out.println("distanceToHQ: " + rc.getLocation().distanceSquaredTo(getMyHQ()));
                     return true;
                 }
             }
@@ -310,9 +311,16 @@ public class RobotPlayer {
                 int rallyX = rc.readBroadcast(0);
                 int rallyY = rc.readBroadcast(1);
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-
                 Direction newDir = getMoveDir(rallyPoint);
-                if (newDir != null) {
+                //Make soldiers defend HQ rather than gathering
+                if(rc.getType() == RobotType.SOLDIER){
+                    Direction HQDir= getMoveDir(myHQ);
+                    if (HQDir != null) {
+                        rc.move(HQDir);
+                    }else{
+                        moveRandom();
+                    }
+                }else if (newDir != null) {
                     rc.move(newDir);
                 }else{
                     moveRandom();
@@ -510,7 +518,7 @@ public class RobotPlayer {
             rc.broadcast(CloseDistanceChannel, CloseDistance);
             int numBeavers = rc.readBroadcast(BeaverNumChannel);
 
-            if (numBeavers < 10) {
+            if (numBeavers < maxBeavers) {
                 boolean spawned = trySpawn(RobotType.BEAVER);
                 if(spawned){
                     rc.broadcast(BeaverNumChannel, numBeavers + 1);
@@ -544,9 +552,9 @@ public class RobotPlayer {
 	                if(nearestTower != null){
 
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-                        //Defend own HQ if we do not have enough combat units to take down any towers
+                        //Defend own towers if we do not have enough combat units to take down any towers
                         if(combatUnitNum < smallCombatUnitNum && Clock.getRoundNum() > LastAttackTurn){
-                            rallyPoint = this.myHQ;
+                            rallyPoint = closestTowerToEnemy;
                         }
                         //Only charge when we have enough combat units
                         //Or the game is ending soon
@@ -628,7 +636,7 @@ public class RobotPlayer {
         private void earlyGameBuildings(int strategy) throws GameActionException {
             switch (strategy){
             case 0:
-            case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.5){
+            case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.1){
                         if(Clock.getRoundNum()%2 == 0){
                             tryBuild(RobotType.TANKFACTORY);
                         }else{
@@ -636,7 +644,7 @@ public class RobotPlayer {
                         }
                       }
                     break;
-            case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.5){
+            case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.1){
                         if(Clock.getRoundNum()%2 == 0){
                             tryBuild(RobotType.HELIPAD);
                         }else{
@@ -709,10 +717,10 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
-            if(Clock.getRoundNum() < ExecuteStrategyTurn){
+            if(Clock.getRoundNum() < StopSoldierSpawnTurn){
                 trySpawn(RobotType.SOLDIER);
             }else{
-                if(rc.getTeamOre()>RobotType.TANKFACTORY.oreCost*1.1){
+                if(rc.getTeamOre()>RobotType.TANKFACTORY.oreCost*2){
                     trySpawn(RobotType.SOLDIER);
                 }
             }
