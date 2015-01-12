@@ -24,16 +24,32 @@ public class RobotPlayer {
 
     static Direction[] directions = {Direction.NORTH, Direction.NORTH_EAST, Direction.EAST, Direction.SOUTH_EAST, Direction.SOUTH, Direction.SOUTH_WEST, Direction.WEST, Direction.NORTH_WEST};
 
-
+    /**
+     * Channels
+     */
     final static int MinerNumChannel = 3;
     final static int BeaverNumChannel = 2;
     final static int BarracksNumChannel = 5;
+    final static int MinerFactoryNumChannel = 6;
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
+
+    /**
+     * Unit number limits
+     */
     final static int tooManyUnits = 5;
     final static int largeCombatUnitNum = 99;
     final static int smallCombatUnitNum = 60;
+
+    /**
+     * Threshold and Round number to alternate unit production
+     */
+    //Choose between soldiers and miners, soldiers more expensive (60)
+    final static int MinerSoldierThreshold = RobotType.SOLDIER.oreCost;
+    final static int TurnDiveder = 3;
+    final static int MinerTurnRemainder = 0;
+    final static int SoldierTurnRemainder = 1;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -45,11 +61,11 @@ public class RobotPlayer {
             myself = new Beaver(rc);
         } else if (rc.getType() == RobotType.MINER) {
             myself = new Miner(rc);
-        } else if (rc.getType() == RobotType.BARRACKS || rc.getType() == RobotType.HELIPAD || 
-        		rc.getType() == RobotType.TANKFACTORY || rc.getType() == RobotType.MINERFACTORY || 
+        } else if (rc.getType() == RobotType.BARRACKS || rc.getType() == RobotType.HELIPAD ||
+        		rc.getType() == RobotType.TANKFACTORY || rc.getType() == RobotType.MINERFACTORY ||
         		rc.getType() == RobotType.TRAININGFIELD || rc.getType() == RobotType.TECHNOLOGYINSTITUTE) {
             myself = new SimpleBuilding(rc);
-        } else if (rc.getType() == RobotType.SOLDIER || rc.getType() == RobotType.DRONE || 
+        } else if (rc.getType() == RobotType.SOLDIER || rc.getType() == RobotType.DRONE ||
         		rc.getType() == RobotType.TANK || rc.getType() == RobotType.COMMANDER) {
             myself = new SimpleFighter(rc);
         } else if (rc.getType() == RobotType.TOWER) {
@@ -101,27 +117,28 @@ public class RobotPlayer {
             Direction[] dirs = getDirectionsToward(dest);
             for (Direction d : dirs) {
                 //Check if the direction is safe
-                boolean safe = true;
                 MapLocation infrontLocation = rc.getLocation().add(d);
-
-                if(theirHQ.distanceSquaredTo(infrontLocation) <= RobotType.HQ.attackRadiusSquared){
-                    //Can be attack by enemy HQ
-                    safe = false;
-                }else{
-                    for(MapLocation m:enemyTowers){
-                        if(m.distanceSquaredTo(infrontLocation) <= RobotType.TOWER.attackRadiusSquared){
-                            //Can be attack by enemy towers
-                            safe = false;
-                            break;
-                        }
-                    }
-                }
-
+                boolean safe = safetyCheck(infrontLocation);
                 if (rc.canMove(d) && safe) {
                     return d;
                 }
             }
             return null;
+        }
+
+        private boolean safetyCheck(MapLocation infrontLocation) {
+            if(theirHQ.distanceSquaredTo(infrontLocation) <= RobotType.HQ.attackRadiusSquared + 1){
+                //Can be attack by enemy HQ
+                return false;
+            }else{
+                for(MapLocation m:enemyTowers){
+                    if(m.distanceSquaredTo(infrontLocation) <= RobotType.TOWER.attackRadiusSquared + 1){
+                        //Can be attack by enemy towers
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
 
         public Direction getMoveDir(MapLocation dest) {
@@ -260,27 +277,25 @@ public class RobotPlayer {
 
         public void moveRandom() throws GameActionException {
             randomTurnFacing();
-            MapLocation locInfront = rc.getLocation().add(facing);
+            MapLocation infrontLocation = rc.getLocation().add(facing);
             //Check safe
-            boolean safe = true;
-            for(MapLocation m:enemyTowers){
-                if(m.distanceSquaredTo(locInfront) <= RobotType.TOWER.attackRadiusSquared){
-                    safe = false;
-                    break;
-                }
-            }
+            boolean safe = safetyCheck(infrontLocation);
 
-            if(rc.senseTerrainTile(locInfront) != TerrainTile.NORMAL){
+            if(rc.senseTerrainTile(infrontLocation) != TerrainTile.NORMAL){
                 turnFacing();
             }
+            //Move not safe, try turning back and test if safe again
             if(!safe){
-                turnBack();
+                facing = facing.opposite();
+                infrontLocation = rc.getLocation().add(facing);
+                safe = safetyCheck(infrontLocation);
             }
-            if(rc.isCoreReady() && rc.canMove(facing)){
+            if(rc.isCoreReady() && rc.canMove(facing) && safe){
                 rc.move(facing);
-            }else if(rc.isCoreReady() && rc.canMove(facing.opposite())){
-                rc.move(facing.opposite());
             }
+            //else if(rc.isCoreReady() && rc.canMove(facing.opposite())){
+            //    rc.move(facing.opposite());
+            //}
         }
 
         public void randomTurnFacing() {
@@ -291,17 +306,13 @@ public class RobotPlayer {
 
         public void turnFacing() {
             if(rand.nextInt(10) < 5){
-                facing = facing.rotateLeft();
+                facing = facing.rotateLeft().rotateLeft();
             }else {
-                facing = facing.rotateRight();
+                facing = facing.rotateRight().rotateRight();
             }
         }
 
-        public void turnBack() {
-            facing = facing.opposite();
-        }
-
-        public MapLocation getNearestTower() throws GameActionException {
+        public MapLocation getNearestEnemyTower() throws GameActionException {
             MapLocation[] enemyTowers = rc.senseEnemyTowerLocations();
             if(enemyTowers.length > 0){
                 int nearestDis = 99999;
@@ -578,26 +589,26 @@ public class RobotPlayer {
             }else {
             	if(strategy == 0){
             		//TODO: come up with defensive strategy
-            		MapLocation nearestTower = getNearestTower();
+            		MapLocation nearestTower = getNearestEnemyTower();
  	                if(nearestTower != null){
  	                    rallyPoint = nearestTower;
  	                }else{
  	                    rallyPoint = this.theirHQ;
  	                }
             	} else {
-	                MapLocation nearestTower = getNearestTower();
-	                if(nearestTower != null){
-
+	                MapLocation nearestEnemyTower = getNearestEnemyTower();
+	                if(nearestEnemyTower != null){
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-                        //Defend own towers if we do not have enough combat units to take down any towers
-                        if(combatUnitNum < smallCombatUnitNum && Clock.getRoundNum() > LastAttackTurn){
-                            rallyPoint = closestTowerToEnemy;
+                        //Attack if we have enough units
+                        if(combatUnitNum > largeCombatUnitNum){
+                            rallyPoint = nearestEnemyTower;
                         }
-                        //Only charge when we have enough combat units
-                        //Or the game is ending soon
-                        else if(combatUnitNum > largeCombatUnitNum || Clock.getRoundNum() > LastAttackTurn){
-                            rallyPoint = nearestTower;
-                        }else{
+                        //Defend own HQ if we do not have enough combat units to take down any towers
+                        else if(Clock.getRoundNum() > LastAttackTurn){
+                            rallyPoint = myHQ;
+                        }
+                        //Default rally point
+                        else{
                             rallyPoint = closestTowerToEnemy;
                         }
 	                }else{
@@ -629,10 +640,30 @@ public class RobotPlayer {
         	int strategy = rc.readBroadcast(100);
         	
             autoAttack();
-            if(Clock.getRoundNum() < StopMinerFactoryBuildTurn){
-                tryBuild(RobotType.MINERFACTORY);
+            int roundNum = Clock.getRoundNum();
+            int barrack_num = rc.readBroadcast(BarracksNumChannel);
+            int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
+            //Build at least one minerfactory
+            if(minerfactory_num == 0){
+                boolean built = tryBuild(RobotType.MINERFACTORY);
+                if(built){
+                    rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
+                }
+            }
+            //Allow early barracks at 1/3 chance
+            else if(roundNum < StopMinerFactoryBuildTurn){
+                if(roundNum%3 == 0 && barrack_num < 3){
+                    boolean built = tryBuild(RobotType.BARRACKS);
+                    if(built){
+                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
+                    }
+                }else{
+                    boolean built = tryBuild(RobotType.MINERFACTORY);
+                    if(built){
+                        rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
+                    }
+                }
             }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
-                int barrack_num = rc.readBroadcast(BarracksNumChannel);
                 //Limit the number of barracks
                 if(barrack_num < 3){
                     boolean built = tryBuild(RobotType.BARRACKS);
@@ -708,8 +739,9 @@ public class RobotPlayer {
         }
         public void execute() throws GameActionException {
             int numMiners = rc.readBroadcast(MinerNumChannel);
-
-            if(Clock.getRoundNum() < StopMinerSpawnTurn){
+            int roundNum = Clock.getRoundNum();
+            //Allow spawning of other units by alternating turn number
+            if(roundNum < StopMinerSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && roundNum%TurnDiveder == MinerTurnRemainder){
                 boolean spawned = trySpawn(RobotType.MINER);
                 if(spawned){
                     rc.broadcast(MinerNumChannel, numMiners + 1);
@@ -752,9 +784,9 @@ public class RobotPlayer {
         public Barracks(RobotController rc) {
             super(rc);
         }
-
         public void execute() throws GameActionException {
-            if(Clock.getRoundNum() < StopSoldierSpawnTurn){
+            int roundNum = Clock.getRoundNum();
+            if(roundNum < StopSoldierSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && roundNum%TurnDiveder == SoldierTurnRemainder){
                 trySpawn(RobotType.SOLDIER);
             }else{
                 if(rc.getTeamOre()>RobotType.TANKFACTORY.oreCost*2){
