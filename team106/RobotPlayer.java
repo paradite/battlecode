@@ -39,7 +39,7 @@ public class RobotPlayer {
      * Unit number limits
      */
     final static int tooManyUnits = 5;
-    final static int largeCombatUnitNum = 99;
+    final static int largeCombatUnitNum = 90;
     final static int smallCombatUnitNum = 60;
 
     /**
@@ -652,7 +652,7 @@ public class RobotPlayer {
             }
             //Allow early barracks at 1/3 chance
             else if(roundNum < StopMinerFactoryBuildTurn){
-                if(roundNum%3 == 0 && barrack_num < 3){
+                if(roundNum%3 == 0 && barrack_num < 3 && rc.getTeamOre() > RobotType.MINERFACTORY.oreCost){
                     boolean built = tryBuild(RobotType.BARRACKS);
                     if(built){
                         rc.broadcast(BarracksNumChannel, barrack_num + 1);
