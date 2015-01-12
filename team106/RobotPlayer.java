@@ -71,6 +71,7 @@ public class RobotPlayer {
         protected RobotController rc;
         protected MapLocation myHQ, theirHQ;
         protected Team myTeam, theirTeam;
+        protected MapLocation[] enemyTowers;
 
         public BaseBot(RobotController rc) {
             this.rc = rc;
@@ -78,6 +79,7 @@ public class RobotPlayer {
             this.theirHQ = rc.senseEnemyHQLocation();
             this.myTeam = rc.getTeam();
             this.theirTeam = this.myTeam.opponent();
+            this.enemyTowers = rc.senseEnemyTowerLocations();
         }
 
         public MapLocation getMyHQ() {
@@ -93,8 +95,35 @@ public class RobotPlayer {
             return dirs;
         }
 
-        //TODO: Avoid towers here when moving to a destination
+        //Avoid towers and enemy HQ when moving to a destination
         //Assigned to Zhu Liang
+        public Direction getMoveDirSafely(MapLocation dest) {
+            Direction[] dirs = getDirectionsToward(dest);
+            for (Direction d : dirs) {
+                //Check if the direction is safe
+                boolean safe = true;
+                MapLocation infrontLocation = rc.getLocation().add(d);
+
+                if(theirHQ.distanceSquaredTo(infrontLocation) <= RobotType.HQ.attackRadiusSquared){
+                    //Can be attack by enemy HQ
+                    safe = false;
+                }else{
+                    for(MapLocation m:enemyTowers){
+                        if(m.distanceSquaredTo(infrontLocation) <= RobotType.TOWER.attackRadiusSquared){
+                            //Can be attack by enemy towers
+                            safe = false;
+                            break;
+                        }
+                    }
+                }
+
+                if (rc.canMove(d) && safe) {
+                    return d;
+                }
+            }
+            return null;
+        }
+
         public Direction getMoveDir(MapLocation dest) {
             Direction[] dirs = getDirectionsToward(dest);
             for (Direction d : dirs) {
@@ -170,8 +199,6 @@ public class RobotPlayer {
             }
         }
 
-       
-
         public boolean tryBuild(RobotType type) throws GameActionException {
             int closeDistance = rc.readBroadcast(CloseDistanceChannel);
             RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
@@ -235,7 +262,6 @@ public class RobotPlayer {
             randomTurnFacing();
             MapLocation locInfront = rc.getLocation().add(facing);
             //Check safe
-            MapLocation[] enemyTowers = rc.senseEnemyTowerLocations();
             boolean safe = true;
             for(MapLocation m:enemyTowers){
                 if(m.distanceSquaredTo(locInfront) <= RobotType.TOWER.attackRadiusSquared){
@@ -314,11 +340,11 @@ public class RobotPlayer {
                 int rallyY = rc.readBroadcast(1);
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
                 Direction newDir = getMoveDir(rallyPoint);
-                //Make soldiers defend HQ rather than gathering
                 //TODO: Make soldiers protect the miners as well as defend the HQ
                 //Assigned to Zhu Liang
+                //Set to enemy HQ to test out the getMoveDirSafely function
                 if(rc.getType() == RobotType.SOLDIER){
-                    Direction HQDir= getMoveDir(myHQ);
+                    Direction HQDir= getMoveDirSafely(theirHQ);
                     if (HQDir != null) {
                         rc.move(HQDir);
                     }else{
