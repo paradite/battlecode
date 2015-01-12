@@ -93,6 +93,8 @@ public class RobotPlayer {
             return dirs;
         }
 
+        //TODO: Avoid towers here when moving to a destination
+        //Assigned to Zhu Liang
         public Direction getMoveDir(MapLocation dest) {
             Direction[] dirs = getDirectionsToward(dest);
             for (Direction d : dirs) {
@@ -313,6 +315,8 @@ public class RobotPlayer {
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
                 Direction newDir = getMoveDir(rallyPoint);
                 //Make soldiers defend HQ rather than gathering
+                //TODO: Make soldiers protect the miners as well as defend the HQ
+                //Assigned to Zhu Liang
                 if(rc.getType() == RobotType.SOLDIER){
                     Direction HQDir= getMoveDir(myHQ);
                     if (HQDir != null) {
@@ -349,6 +353,10 @@ public class RobotPlayer {
             rc.yield();
         }
     }
+
+    /**
+     * Buildings
+     */
     public static class SimpleBuilding extends BaseBot {
         public SimpleBuilding(RobotController rc) {
             super(rc);
@@ -393,6 +401,9 @@ public class RobotPlayer {
         }
     }
 
+    /**
+     * Combat Units
+     */
     public static class SimpleFighter extends BaseBot {
         public SimpleFighter(RobotController rc) {
             super(rc);
