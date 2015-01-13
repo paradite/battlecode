@@ -18,7 +18,7 @@ public class RobotPlayer {
     private static int StopMinerFactoryBuildTurn = 500;
     private static int StopMinerSpawnTurn = 800;
     private static int SpawnCommanderTurn = 850;
-    private static int MaxMiner = 80;
+    private static int MaxMiner = 60;
     private static int maxBeavers = 15;
     static Random rand;
     static Direction facing;
