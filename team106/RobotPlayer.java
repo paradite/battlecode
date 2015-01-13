@@ -38,7 +38,8 @@ public class RobotPlayer {
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
     final static int ActualAttackTurnChannel = 50;
-
+    final static int SoldierRallyXChannel = 70;
+    final static int SoldierRallyYChannel = 69;
     /**
      * Unit number limits
      */
@@ -92,6 +93,8 @@ public class RobotPlayer {
         protected MapLocation myHQ, theirHQ;
         protected Team myTeam, theirTeam;
         protected MapLocation[] enemyTowers;
+    	protected boolean hasRallied;
+    	protected boolean hasCharged;
 
         public BaseBot(RobotController rc) {
             this.rc = rc;
@@ -100,6 +103,8 @@ public class RobotPlayer {
             this.myTeam = rc.getTeam();
             this.theirTeam = this.myTeam.opponent();
             this.enemyTowers = rc.senseEnemyTowerLocations();
+            this.hasRallied = false;
+            this.hasCharged = false;
         }
 
         public MapLocation getMyHQ() {
@@ -218,7 +223,7 @@ public class RobotPlayer {
         }
 
         public RobotInfo[] getEnemiesInAttackingRange() {
-            RobotInfo[] enemies = rc.senseNearbyRobots(RobotType.SOLDIER.attackRadiusSquared, theirTeam);
+            RobotInfo[] enemies = rc.senseNearbyRobots(rc.getType().attackRadiusSquared, theirTeam);
             return enemies;
         }
 
@@ -268,8 +273,8 @@ public class RobotPlayer {
             }
             if(buildingClash){
                 mineOrMove();
-            //Avoid building around the HQ and causing congestion, encourage going further away
-            }else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance){
+            //Avoid building around the HQ (UNLESS IT IS THE ANTI DRONE RUSH MACHINE) and causing congestion, encourage going further away
+            }else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance && type != RobotType.BARRACKS){
                 mineOrMove();
             //Avoid building around too many other units to avoid congestion
             }else if(nearbyAllies.length > tooManyUnits){
@@ -402,12 +407,21 @@ public class RobotPlayer {
                 //Assigned to Zhu Liang
                 //Set to enemy HQ to test out the getMoveDirSafely function
                 if(rc.getType() == RobotType.SOLDIER && Clock.getRoundNum() < SolderSurroundEndTurn){
-                    Direction HQDir= getMoveDirSafely(theirHQ);
-                    if (HQDir != null) {
-                        rc.move(HQDir);
-                    }else{
-                        moveRandom();
-                    }
+                	int x = rc.readBroadcast(SoldierRallyXChannel);
+                	int y = rc.readBroadcast(SoldierRallyYChannel);
+                	if (x == theirHQ.x && y == theirHQ.y){
+                		//HQ is safe, destroy their base
+	                	Direction HQDir= getMoveDirSafely(theirHQ);
+	                    if (HQDir != null && !this.hasRallied) {
+	                        rc.move(HQDir);
+	                    }else{
+	                        moveRandom();
+	                    }
+                	} else{
+                		Direction enemy = getMoveDir(new MapLocation(x, y));
+                		if(enemy!=null)
+                			rc.move(enemy);
+                	}
                 }else if (newDir != null) {
                     rc.move(newDir);
                 }else{
@@ -489,6 +503,8 @@ public class RobotPlayer {
      * Combat Units
      */
     public static class SimpleFighter extends BaseBot {
+
+    	
         public SimpleFighter(RobotController rc) {
             super(rc);
         }
@@ -614,7 +630,24 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
-
+        	//ANTI-RUSH
+        	//check for nearby enemies
+        	if(Clock.getRoundNum() < 1000){
+        		RobotInfo[] enemies = rc.senseNearbyRobots(35,theirTeam);
+        		if(enemies.length > 0){
+        			//call soldiers to defend our HQ
+        			rc.broadcast(SoldierRallyXChannel, enemies[0].location.x);
+        			rc.broadcast(SoldierRallyYChannel, enemies[0].location.y);
+        		} else{
+        			//surround their HQ
+        			rc.broadcast(SoldierRallyXChannel, theirHQ.x);
+        			rc.broadcast(SoldierRallyYChannel, theirHQ.y);
+        		}
+        		
+        		
+        	}
+        	
+        	
             //Tell the other units the close distance to HQ
             //This is used to encourage units to move away from HQ to avoid congestion
             rc.broadcast(CloseDistanceChannel, CloseDistance);
@@ -723,14 +756,18 @@ public class RobotPlayer {
             int roundNum = Clock.getRoundNum();
             int barrack_num = rc.readBroadcast(BarracksNumChannel);
             int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
-            //Build at least one minerfactory
-            if(minerfactory_num == 0){
-                boolean built = tryBuild(RobotType.MINERFACTORY);
+            //Build at least one barracks, counter drone rush
+            if(barrack_num == 0){
+            	boolean built = tryBuild(RobotType.BARRACKS);
+                if(built){
+                    rc.broadcast(BarracksNumChannel, barrack_num + 1);
+                }
+            } else if(minerfactory_num == 0){
+            	boolean built = tryBuild(RobotType.MINERFACTORY);
                 if(built){
                     rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
                 }
             }
-            //Allow early barracks at 1/3 chance
             else if(roundNum < StopMinerFactoryBuildTurn){
                 if(barrack_num < 3 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
                     boolean built = tryBuild(RobotType.BARRACKS);
@@ -758,6 +795,8 @@ public class RobotPlayer {
             rc.yield();
         }
         
+        
+        
         public void executeStrategy(int strategy) throws GameActionException{
         	if(Clock.getRoundNum() >= SpawnCommanderTurn){
                 //Late game
@@ -776,7 +815,7 @@ public class RobotPlayer {
         	}
         		
         	else{
-                //Early game
+                //Mid game
                 midGameBuildings(strategy);
             }
         }
