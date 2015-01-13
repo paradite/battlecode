@@ -7,15 +7,17 @@ import java.util.*;
 public class RobotPlayer {
     //The turn to attack if we have enough combat units
     static int ChargeTurn = 1300;
+    static int SolderSurroundEndTurn = ChargeTurn - 200;
 
     //The turn to attack even if we don't have enough combat units
-    //Miners also attack in this turn
     static int LastAttackTurn = 1500;
+    //Miners attack in this turn
+    static int MinerAttackTurn = 1700;
 
     private static int moveAwayFromHQTurn = 200;
-    private static int ExecuteStrategyTurn = 600;
+    private static int ExecuteStrategyTurn = 500;
     private static int StopSoldierSpawnTurn = 700;
-    private static int StopMinerFactoryBuildTurn = 500;
+    private static int StopMinerFactoryBuildTurn = 400;
     private static int StopMinerSpawnTurn = 800;
     private static int SpawnCommanderTurn = 850;
     private static int MaxMiner = 60;
@@ -35,6 +37,7 @@ public class RobotPlayer {
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
+    final static int ActualAttackTurnChannel = 50;
 
     /**
      * Unit number limits
@@ -125,6 +128,31 @@ public class RobotPlayer {
                 }
             }
             return null;
+        }
+
+        //Avoid towers when moving to a destination
+        //Assigned to Zhu Liang
+        public Direction getMoveDirAvoidTowers(MapLocation dest) {
+            Direction[] dirs = getDirectionsToward(dest);
+            for (Direction d : dirs) {
+                //Check if the direction is safe
+                MapLocation infrontLocation = rc.getLocation().add(d);
+                boolean safe = safetyCheckTower(infrontLocation);
+                if (rc.canMove(d) && safe) {
+                    return d;
+                }
+            }
+            return null;
+        }
+
+        private boolean safetyCheckTower(MapLocation infrontLocation) {
+            for(MapLocation m:enemyTowers){
+                if(m.distanceSquaredTo(infrontLocation) <= RobotType.TOWER.attackRadiusSquared + 1){
+                    //Can be attack by enemy towers
+                    return false;
+                }
+            }
+            return true;
         }
 
         private boolean safetyCheck(MapLocation infrontLocation) {
@@ -347,11 +375,25 @@ public class RobotPlayer {
                 int rallyX = rc.readBroadcast(0);
                 int rallyY = rc.readBroadcast(1);
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                Direction newDir = getMoveDir(rallyPoint);
+                Direction newDir;
+                //If moving to HQ, then avoid towers and sorround HQ fisrt
+                //Then after 50 turns, attack HQ
+                if(rallyX == theirHQ.x && rallyY == theirHQ.y){
+                    int actualAttackTurn = rc.readBroadcast(ActualAttackTurnChannel);
+                    if(Clock.getRoundNum() < (actualAttackTurn + 50)){
+                        //Surround the HQ first
+                        newDir = getMoveDirSafely(rallyPoint);
+                    }else{
+                        //Attack HQ directly
+                        newDir = getMoveDir(rallyPoint);
+                    }
+                }else{
+                    newDir = getMoveDir(rallyPoint);
+                }
                 //TODO: Allow soldiers to charge as well
                 //Assigned to Zhu Liang
                 //Set to enemy HQ to test out the getMoveDirSafely function
-                if(rc.getType() == RobotType.SOLDIER){
+                if(rc.getType() == RobotType.SOLDIER && Clock.getRoundNum() < SolderSurroundEndTurn){
                     Direction HQDir= getMoveDirSafely(theirHQ);
                     if (HQDir != null) {
                         rc.move(HQDir);
@@ -500,6 +542,13 @@ public class RobotPlayer {
     			//default strategy, attack with tanks
     			strategy = 1;
     		}
+
+            //Choose point of attack based on tower threat
+            if(towerThreat > 30){
+
+            }else{
+
+            }
     		System.out.println("Strategy Chosen: "+strategy);
     		rc.broadcast(StrategyNumChannel, strategy);
     	}
@@ -542,9 +591,10 @@ public class RobotPlayer {
             for (int i=0; i<towers.length; ++i) {
                 MapLocation towerLoc = towers[i];
 
+                //Modified formula for ranged units, 50 --> 25
                 if ((xMin <= towerLoc.x && towerLoc.x <= xMax && yMin <= towerLoc.y && towerLoc.y <= yMax) || towerLoc.distanceSquaredTo(this.theirHQ) <= 50) {
                     for (int j=0; j<towers.length; ++j) {
-                        if (towers[j].distanceSquaredTo(towerLoc) <= 50) {
+                        if (towers[j].distanceSquaredTo(towerLoc) <= 25) {
                             towerThreat++;
                         }
                     }
@@ -584,6 +634,9 @@ public class RobotPlayer {
 	            }
 	            rallyPoint = closestTowerToEnemy;
             }else {
+                if (Clock.getRoundNum() == ChargeTurn){
+                    countSoldiersAsCombatUnits();
+                }
             	if(strategy == 0){
             		//TODO: come up with defensive strategy
             		MapLocation nearestTower = getNearestEnemyTower();
@@ -594,11 +647,21 @@ public class RobotPlayer {
  	                }
             	} else {
 	                MapLocation nearestEnemyTower = getNearestEnemyTower();
+
 	                if(nearestEnemyTower != null){
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-                        //Attack if we have enough units
+                        //Attack if we have enough combat units
                         if(combatUnitNum > largeCombatUnitNum){
-                            rallyPoint = nearestEnemyTower;
+                            //Report the turn of attack if not set yet
+                            if(rc.readBroadcast(ActualAttackTurnChannel) == 0){
+                                rc.broadcast(ActualAttackTurnChannel, Clock.getRoundNum());
+                            }
+                            //Attack towers if low tower threat
+                            if(towerThreat < 30){
+                                rallyPoint = nearestEnemyTower;
+                            }else{
+                                rallyPoint = this.theirHQ;
+                            }
                         }
                         //Defend own HQ if we do not have enough combat units to take down any towers
                         else if(Clock.getRoundNum() > LastAttackTurn){
@@ -621,6 +684,18 @@ public class RobotPlayer {
             }
             
             rc.yield();
+        }
+
+        private void countSoldiersAsCombatUnits() throws GameActionException {
+            int soldierCount = 0;
+            int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+            RobotInfo[] allMyUnits = rc.senseNearbyRobots(99999, myTeam);
+            for(RobotInfo m:allMyUnits){
+                if(m.type == RobotType.SOLDIER){
+                    soldierCount++;
+                }
+            }
+            rc.broadcast(CombatUnitNumChannel, soldierCount/2 + combatUnitNum);
         }
     }
 
@@ -765,7 +840,7 @@ public class RobotPlayer {
 
         public void execute() throws GameActionException {
             autoAttack();
-            if(Clock.getRoundNum() > LastAttackTurn){
+            if(Clock.getRoundNum() > MinerAttackTurn){
                 combatUnitActions();
             }else{
                 mineOrMove();
