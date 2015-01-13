@@ -1,4 +1,4 @@
-package team106;
+package dronerush;
 
 import battlecode.common.*;
 
@@ -18,7 +18,7 @@ public class RobotPlayer {
     private static int StopMinerSpawnTurn = 800;
     private static int SpawnCommanderTurn = 850;
     private static int MaxMiner = 80;
-    private static int maxBeavers = 15;
+    private static int maxBeavers = 10;
     static Random rand;
     static Direction facing;
 
@@ -88,7 +88,8 @@ public class RobotPlayer {
         protected MapLocation myHQ, theirHQ;
         protected Team myTeam, theirTeam;
         protected MapLocation[] enemyTowers;
-
+        private boolean isAttacker;
+        
         public BaseBot(RobotController rc) {
             this.rc = rc;
             this.myHQ = rc.senseHQLocation();
@@ -96,6 +97,7 @@ public class RobotPlayer {
             this.myTeam = rc.getTeam();
             this.theirTeam = this.myTeam.opponent();
             this.enemyTowers = rc.senseEnemyTowerLocations();
+            isAttacker =  Clock.getRoundNum() > 800;
         }
 
         public MapLocation getMyHQ() {
@@ -117,12 +119,14 @@ public class RobotPlayer {
                          toDest.rotateRight().rotateRight(), toDest.rotateLeft().rotateLeft()};
             	 return dirs;
             }
+            
         }
 
         //Avoid towers and enemy HQ when moving to a destination
         //Assigned to Zhu Liang
         public Direction getMoveDirSafely(MapLocation dest) {
             Direction[] dirs = getDirectionsToward(dest);
+            
             for (Direction d : dirs) {
                 //Check if the direction is safe
                 MapLocation infrontLocation = rc.getLocation().add(d);
@@ -357,12 +361,15 @@ public class RobotPlayer {
             if (rc.isCoreReady()) {
                 int rallyX = rc.readBroadcast(0);
                 int rallyY = rc.readBroadcast(1);
+                int combatUnits = rc.readBroadcast(CombatUnitNumChannel);
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                Direction newDir = getMoveDir(rallyPoint);
-                //TODO: Make soldiers protect the miners as well as defend the HQ
-                //Assigned to Zhu Liang
-                //Set to enemy HQ to test out the getMoveDirSafely function
-                if(rc.getType() == RobotType.SOLDIER){
+                Direction newDir;
+                if(Clock.getRoundNum() < ChargeTurn)
+                	newDir = getMoveDirSafely(rallyPoint);
+                else
+                	newDir = getMoveDir(rallyPoint);
+                
+                if(rc.getType() == RobotType.DRONE && !isAttacker){
                     Direction HQDir= getMoveDirSafely(theirHQ);
                     if (HQDir != null) {
                         rc.move(HQDir);
@@ -457,6 +464,9 @@ public class RobotPlayer {
         public void execute() throws GameActionException {
             autoAttack();
             combatUnitActions();
+            if(Clock.getRoundNum() > ChargeTurn && rc.isCoreReady()){
+            	rc.move(getMoveDir(this.theirHQ));
+            }
             rc.yield();
         }
     }
@@ -608,17 +618,11 @@ public class RobotPlayer {
 	                if(nearestEnemyTower != null){
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
                         //Attack if we have enough units
-                        if(combatUnitNum > largeCombatUnitNum){
+                        if(true){
                             rallyPoint = nearestEnemyTower;
                         }
                         //Defend own HQ if we do not have enough combat units to take down any towers
-                        else if(Clock.getRoundNum() > LastAttackTurn){
-                            rallyPoint = myHQ;
-                        }
-                        //Default rally point
-                        else{
-                            rallyPoint = closestTowerToEnemy;
-                        }
+                       
 	                }else{
 	                    rallyPoint = this.theirHQ;
 	                }
@@ -650,37 +654,8 @@ public class RobotPlayer {
             autoAttack();
             int roundNum = Clock.getRoundNum();
             int barrack_num = rc.readBroadcast(BarracksNumChannel);
-            int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
-            //Build at least one minerfactory
-            if(minerfactory_num == 0){
-                boolean built = tryBuild(RobotType.MINERFACTORY);
-                if(built){
-                    rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
-                }
-            }
-            //Allow early barracks at 1/3 chance
-            else if(roundNum < StopMinerFactoryBuildTurn){
-                if(barrack_num < 3 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
-                    boolean built = tryBuild(RobotType.BARRACKS);
-                    if(built){
-                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
-                    }
-                }else{
-                    boolean built = tryBuild(RobotType.MINERFACTORY);
-                    if(built){
-                        rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
-                    }
-                }
-            }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
-                //Limit the number of barracks
-                if(barrack_num < 3){
-                    boolean built = tryBuild(RobotType.BARRACKS);
-                    if(built){
-                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
-                    }
-                }
-            }else {
-            	executeStrategy(strategy);
+            if(roundNum < ChargeTurn){
+            	tryBuild(RobotType.HELIPAD);
             }
             mineOrMove();
             rc.yield();
