@@ -12,6 +12,7 @@ public class RobotPlayer {
     //Miners also attack in this turn
     static int LastAttackTurn = 1500;
 
+    private static int moveAwayFromHQTurn = 200;
     private static int ExecuteStrategyTurn = 600;
     private static int StopSoldierSpawnTurn = 700;
     private static int StopMinerFactoryBuildTurn = 500;
@@ -38,7 +39,7 @@ public class RobotPlayer {
     /**
      * Unit number limits
      */
-    final static int tooManyUnits = 5;
+    final static int tooManyUnits = 8;
     final static int largeCombatUnitNum = 90;
     final static int smallCombatUnitNum = 60;
 
@@ -250,19 +251,15 @@ public class RobotPlayer {
 
         public void mineOrMove() throws GameActionException {
             //Avoid concentrating around the HQ, encourage going further away
-            if(rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
+            //Allow near HQ in early game, only use this later in the game
+            if(Clock.getRoundNum() > moveAwayFromHQTurn && rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
                 if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>15 && rc.canMine() && rand.nextInt(10) < 2){
                     rc.mine();
                 }else{
                     moveRandom();
                 }
-            }
-            else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>15 && rc.canMine()){
-                if (rand.nextInt(10) < 9) {
-                    rc.mine();
-                } else {
-                    moveRandom();
-                }
+            }else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>5 && rc.canMine()){
+                rc.mine();
             }else if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>1 && rc.canMine()) {
                 if (rand.nextInt(10) < 5) {
                     rc.mine();
@@ -351,7 +348,7 @@ public class RobotPlayer {
                 int rallyY = rc.readBroadcast(1);
                 MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
                 Direction newDir = getMoveDir(rallyPoint);
-                //TODO: Make soldiers protect the miners as well as defend the HQ
+                //TODO: Allow soldiers to charge as well
                 //Assigned to Zhu Liang
                 //Set to enemy HQ to test out the getMoveDirSafely function
                 if(rc.getType() == RobotType.SOLDIER){
@@ -453,7 +450,6 @@ public class RobotPlayer {
         }
     }
 
-    
     /**
      * HQ
      */
@@ -566,7 +562,8 @@ public class RobotPlayer {
             rc.broadcast(CloseDistanceChannel, CloseDistance);
             int numBeavers = rc.readBroadcast(BeaverNumChannel);
 
-            if (numBeavers < maxBeavers) {
+            //Limit the number of beavers by only spawning them at certain turns
+            if (numBeavers < maxBeavers && Clock.getRoundNum()%50 == 0) {
                 boolean spawned = trySpawn(RobotType.BEAVER);
                 if(spawned){
                     rc.broadcast(BeaverNumChannel, numBeavers + 1);
