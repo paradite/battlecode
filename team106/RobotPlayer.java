@@ -43,7 +43,7 @@ public class RobotPlayer {
      * Unit number limits
      */
     final static int tooManyUnits = 8;
-    final static int largeCombatUnitNum = 90;
+    final static int largeCombatUnitNum = 80;
     final static int smallCombatUnitNum = 60;
 
     /**
