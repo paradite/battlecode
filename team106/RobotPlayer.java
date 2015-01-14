@@ -53,6 +53,9 @@ public class RobotPlayer {
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
     final static int ActualAttackTurnChannel = 50;
+
+    //Update this channel with current turn number to signal help needed as of this turn
+    final static int HelpNeedChannel = 68;
     final static int SoldierRallyXChannel = 70;
     final static int SoldierRallyYChannel = 69;
     /**
@@ -75,7 +78,7 @@ public class RobotPlayer {
     /**
      * Distance constants
      */
-    final static int NearHQ = 50;
+    final static int NearBuilding = 64;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -410,47 +413,47 @@ public class RobotPlayer {
 
         public void combatUnitActions() throws GameActionException {
             if (rc.isCoreReady()) {
-                int rallyX = rc.readBroadcast(0);
-                int rallyY = rc.readBroadcast(1);
-                MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                Direction newDir;
-                //If moving to HQ, then avoid towers and sorround HQ fisrt
-                //Then after 50 turns, attack HQ
-                if(rallyX == theirHQ.x && rallyY == theirHQ.y){
-                    int actualAttackTurn = rc.readBroadcast(ActualAttackTurnChannel);
-                    if(Clock.getRoundNum() < (actualAttackTurn + 50)){
-                        //Surround the HQ first
-                        newDir = getMoveDirSafely(rallyPoint);
-                    }else{
-                        //Attack HQ directly
-                        newDir = getMoveDir(rallyPoint);
+                int currentRoundNum = Clock.getRoundNum();
+                int needhelp = rc.readBroadcast(HelpNeedChannel);
+                if(needhelp == currentRoundNum || needhelp == currentRoundNum - 1){
+                    //Our buildings under attack, go back
+                    int x = rc.readBroadcast(SoldierRallyXChannel);
+                    int y = rc.readBroadcast(SoldierRallyYChannel);
+                    Direction enemy = getMoveDirAvoidTowers(new MapLocation(x, y));
+                    if(enemy!=null)
+                        rc.move(enemy);
+                }else if(rc.getType() == RobotType.SOLDIER && currentRoundNum < SolderSurroundEndTurn) {
+                    //Buildings are safe, soldiers destroy their base
+                    Direction HQDir = getMoveDirSafely(theirHQ);
+                    if (HQDir != null && !this.hasRallied) {
+                        rc.move(HQDir);
+                    } else {
+                        moveRandom();
                     }
                 }else{
-                    newDir = getMoveDir(rallyPoint);
-                }
-                //TODO: Allow soldiers to charge as well
-                //Assigned to Zhu Liang
-                //Set to enemy HQ to test out the getMoveDirSafely function
-                if(rc.getType() == RobotType.SOLDIER && Clock.getRoundNum() < SolderSurroundEndTurn){
-                	int x = rc.readBroadcast(SoldierRallyXChannel);
-                	int y = rc.readBroadcast(SoldierRallyYChannel);
-                	if (x == theirHQ.x && y == theirHQ.y){
-                		//HQ is safe, destroy their base
-	                	Direction HQDir= getMoveDirSafely(theirHQ);
-	                    if (HQDir != null && !this.hasRallied) {
-	                        rc.move(HQDir);
-	                    }else{
-	                        moveRandom();
-	                    }
-                	} else{
-                		Direction enemy = getMoveDir(new MapLocation(x, y));
-                		if(enemy!=null)
-                			rc.move(enemy);
-                	}
-                }else if (newDir != null) {
-                    rc.move(newDir);
-                }else{
-                    moveRandom();
+                    int rallyX = rc.readBroadcast(0);
+                    int rallyY = rc.readBroadcast(1);
+                    MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
+                    Direction newDir;
+                    //If moving to HQ, then avoid towers and sorround HQ fisrt
+                    //Then after 50 turns, attack HQ
+                    if(rallyX == theirHQ.x && rallyY == theirHQ.y){
+                        int actualAttackTurn = rc.readBroadcast(ActualAttackTurnChannel);
+                        if(Clock.getRoundNum() < (actualAttackTurn + 50)){
+                            //Surround the HQ first
+                            newDir = getMoveDirSafely(rallyPoint);
+                        }else{
+                            //Attack HQ directly
+                            newDir = getMoveDir(rallyPoint);
+                        }
+                    }else{
+                        newDir = getMoveDir(rallyPoint);
+                    }
+                    if (newDir != null) {
+                        rc.move(newDir);
+                    }else{
+                        moveRandom();
+                    }
                 }
             }
         }
@@ -511,7 +514,29 @@ public class RobotPlayer {
 
             rc.yield();
         }
-        
+
+        public void senseNearbyEnemyCallHelp() throws GameActionException {
+            int currentRoundNum = Clock.getRoundNum();
+            if(currentRoundNum < 1200){
+                RobotInfo[] enemies = rc.senseNearbyRobots(NearBuilding,theirTeam);
+                if(enemies.length > 0){
+                    System.out.println(rc.getType().name() + "sensed enemy");
+                    //call soldiers to defend our HQ
+                    rc.broadcast(SoldierRallyXChannel, enemies[0].location.x);
+                    rc.broadcast(SoldierRallyYChannel, enemies[0].location.y);
+                    rc.broadcast(HelpNeedChannel, currentRoundNum);
+                } else{
+                    //surround their HQ
+                    //Check if other buildings are calling for help in this/last round
+                    if(rc.readBroadcast(HelpNeedChannel) < currentRoundNum - 1){
+                        //No other buildings need help, proceed to enemy HQ
+                        rc.broadcast(SoldierRallyXChannel, theirHQ.x);
+                        rc.broadcast(SoldierRallyYChannel, theirHQ.y);
+                    }
+                }
+            }
+        }
+
         public boolean trySpawn(RobotType type) throws GameActionException {
             if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
                 Direction newDir = getSpawnDirection(type);
@@ -573,16 +598,16 @@ public class RobotPlayer {
             towerThreat = totalNormal = totalProcessed = 0;
             isFinished = false;
             mapSize = Math.max(xMax - xMin,yMax - yMin);
-            System.out.println("x range: " + (xMax - xMin));
-            System.out.println("y range: " + (yMax - yMin));
-            System.out.println("map size: " + mapSize);
+            //System.out.println("x range: " + (xMax - xMin));
+            //System.out.println("y range: " + (yMax - yMin));
+            //System.out.println("map size: " + mapSize);
             CloseDistance = (mapSize / 6) * (mapSize / 6);
-            System.out.println("CloseDistance: " + CloseDistance);
+            //System.out.println("CloseDistance: " + CloseDistance);
         }
 
     	public void chooseStrategy() throws GameActionException{
-            System.out.println("TowerThreat: "+towerThreat);
-            System.out.println("mapRatio: "+mapRatio);
+            //System.out.println("TowerThreat: "+towerThreat);
+            //System.out.println("mapRatio: "+mapRatio);
 
     		if(mapRatio < 0.92){
     			//too many void squares, build drones to attack
@@ -657,22 +682,9 @@ public class RobotPlayer {
         public void execute() throws GameActionException {
         	//ANTI-RUSH
         	//check for nearby enemies
-        	if(Clock.getRoundNum() < 1200){
-        		RobotInfo[] enemies = rc.senseNearbyRobots(NearHQ,theirTeam);
-        		if(enemies.length > 0){
-        			//call soldiers to defend our HQ
-        			rc.broadcast(SoldierRallyXChannel, enemies[0].location.x);
-        			rc.broadcast(SoldierRallyYChannel, enemies[0].location.y);
-        		} else{
-        			//surround their HQ
-        			rc.broadcast(SoldierRallyXChannel, theirHQ.x);
-        			rc.broadcast(SoldierRallyYChannel, theirHQ.y);
-        		}
-        		
-        		
-        	}
-        	
-        	
+            senseNearbyEnemyCallHelp();
+
+
             //Tell the other units the close distance to HQ
             //This is used to encourage units to move away from HQ to avoid congestion
             rc.broadcast(CloseDistanceChannel, CloseDistance);
@@ -823,7 +835,9 @@ public class RobotPlayer {
             //Must build at least 2 miner factories to ensure ore income
             if(minerfactory_num < 2){
                 boolean built = tryBuild(RobotType.MINERFACTORY);
-                rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
+                if(built){
+                    rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
+                }
             }
         	if(Clock.getRoundNum() >= SpawnCommanderTurn){
                 //Late game
@@ -884,6 +898,10 @@ public class RobotPlayer {
             super(rc);
         }
         public void execute() throws GameActionException {
+            //ANTI-RUSH
+            //check for nearby enemies
+            senseNearbyEnemyCallHelp();
+
             int numMiners = rc.readBroadcast(MinerNumChannel);
             int roundNum = Clock.getRoundNum();
             //Allow spawning of other units by alternating turn number
@@ -947,12 +965,15 @@ public class RobotPlayer {
     /**
      * TOWER
      */
-    public static class Tower extends BaseBot {
+    public static class Tower extends SimpleBuilding {
         public Tower(RobotController rc) {
             super(rc);
         }
 
         public void execute() throws GameActionException {
+            //ANTI-RUSH
+            //check for nearby enemies
+            senseNearbyEnemyCallHelp();
             autoAttack();
             rc.yield();
         }

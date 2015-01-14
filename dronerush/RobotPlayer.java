@@ -465,7 +465,10 @@ public class RobotPlayer {
             autoAttack();
             combatUnitActions();
             if(Clock.getRoundNum() > ChargeTurn && rc.isCoreReady()){
-            	rc.move(getMoveDir(this.theirHQ));
+                Direction newDir = getMoveDir(this.theirHQ);
+                if (newDir != null) {
+                    rc.move(newDir);
+                }
             }
             rc.yield();
         }
