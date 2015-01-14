@@ -819,6 +819,7 @@ public class RobotPlayer {
             //Must build at least 2 miner factories to ensure ore income
             if(minerfactory_num < 2){
                 boolean built = tryBuild(RobotType.MINERFACTORY);
+                rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
             }
         	if(Clock.getRoundNum() >= SpawnCommanderTurn){
                 //Late game
