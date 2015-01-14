@@ -5,6 +5,25 @@ import battlecode.common.*;
 import java.util.*;
 
 public class RobotPlayer {
+
+    /**
+     * Strategies
+     */
+    private static int TankS = 1;
+    private static int DroneS = 2;
+
+    /**
+     * Turn constants
+     */
+    private static int moveAwayFromHQTurn = 200;
+
+    //Turn to stop building barracks and miner factories
+    //Start building strategy buildings
+    private static int ExecuteStrategyTurn = 600;
+    private static int StopSoldierSpawnTurn = 700;
+    private static int StopMinerSpawnTurn = 800;
+    private static int SpawnCommanderTurn = 850;
+
     //The turn to attack if we have enough combat units
     static int ChargeTurn = 1300;
     static int SolderSurroundEndTurn = ChargeTurn - 200;
@@ -14,12 +33,9 @@ public class RobotPlayer {
     //Miners attack in this turn
     static int MinerAttackTurn = 1700;
 
-    private static int moveAwayFromHQTurn = 200;
-    private static int ExecuteStrategyTurn = 500;
-    private static int StopSoldierSpawnTurn = 700;
-    private static int StopMinerFactoryBuildTurn = 400;
-    private static int StopMinerSpawnTurn = 800;
-    private static int SpawnCommanderTurn = 850;
+    /**
+     * Unit limits
+     */
     private static int MaxMiner = 60;
     private static int maxBeavers = 15;
     static Random rand;
@@ -44,7 +60,8 @@ public class RobotPlayer {
      * Unit number limits
      */
     final static int tooManyUnits = 8;
-    final static int largeCombatUnitNum = 80;
+    final static int largeDroneNum = 80;
+    final static int largeTankNum = 60;
     final static int smallCombatUnitNum = 60;
 
     /**
@@ -561,10 +578,10 @@ public class RobotPlayer {
 
     		if(mapRatio < 0.92){
     			//too many void squares, build drones to attack
-    			strategy = 2;
+    			strategy = DroneS;
     		} else{
     			//default strategy, attack with tanks
-    			strategy = 1;
+    			strategy = TankS;
     		}
 
             //Choose point of attack based on tower threat
@@ -692,7 +709,8 @@ public class RobotPlayer {
 	                if(nearestEnemyTower != null){
                         int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
                         //Attack if we have enough combat units
-                        if(combatUnitNum > largeCombatUnitNum){
+                        //Less tanks are needed
+                        if(combatUnitNum > largeDroneNum || (combatUnitNum > largeTankNum && strategy == TankS)){
                             //Report the turn of attack if not set yet
                             if(rc.readBroadcast(ActualAttackTurnChannel) == 0){
                                 rc.broadcast(ActualAttackTurnChannel, Clock.getRoundNum());
@@ -767,9 +785,13 @@ public class RobotPlayer {
                 if(built){
                     rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
                 }
-            }
-            else if(roundNum < StopMinerFactoryBuildTurn){
-                if(barrack_num < 3 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
+            }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
+                if(minerfactory_num < 2){
+                    boolean built = tryBuild(RobotType.MINERFACTORY);
+                    if(built){
+                        rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
+                    }
+                }else if(barrack_num < 2 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
                     boolean built = tryBuild(RobotType.BARRACKS);
                     if(built){
                         rc.broadcast(BarracksNumChannel, barrack_num + 1);
@@ -778,14 +800,6 @@ public class RobotPlayer {
                     boolean built = tryBuild(RobotType.MINERFACTORY);
                     if(built){
                         rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
-                    }
-                }
-            }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
-                //Limit the number of barracks
-                if(barrack_num < 3){
-                    boolean built = tryBuild(RobotType.BARRACKS);
-                    if(built){
-                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
                     }
                 }
             }else {
