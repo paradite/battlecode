@@ -15,7 +15,7 @@ public class RobotPlayer {
     /**
      * Turn constants
      */
-    private static int moveAwayFromHQTurn = 200;
+    private static int moveAwayFromHQTurn = 300;
     //Turn to stop building barracks and miner factories
     //Start building strategy buildings
     private static int ExecuteStrategyTurn = 600;
@@ -49,6 +49,7 @@ public class RobotPlayer {
     final static int BeaverNumChannel = 2;
     final static int BarracksNumChannel = 5;
     final static int MinerFactoryNumChannel = 6;
+    final static int HelipadNumChannel = 7;
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
@@ -302,10 +303,12 @@ public class RobotPlayer {
             if(buildingClash){
                 mineOrMove();
             //Avoid building around the HQ (UNLESS IT IS THE ANTI DRONE RUSH MACHINE) and causing congestion, encourage going further away
-            }else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance && type != RobotType.BARRACKS){
-                mineOrMove();
-            //Avoid building around too many other units to avoid congestion
-            }else if(nearbyAllies.length > tooManyUnits){
+            }
+            //else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance && type != RobotType.BARRACKS){
+            //    mineOrMove();
+            ////Avoid building around too many other units to avoid congestion
+            //}
+            else if(nearbyAllies.length > tooManyUnits){
                 mineOrMove();
             }else if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
                 Direction newDir = getBuildDirection(type);
@@ -341,34 +344,26 @@ public class RobotPlayer {
             }
         }
 
+        //Move infront, using get direction with location two grids ahead
         public void moveRandom() throws GameActionException {
-            randomTurnFacing();
-            MapLocation infrontLocation = rc.getLocation().add(facing);
-            //Check safe
-            boolean safe = safetyCheck(infrontLocation);
-
-            if(rc.senseTerrainTile(infrontLocation) != TerrainTile.NORMAL){
+            //randomTurnFacing();
+            MapLocation infrontLocation = rc.getLocation().add(facing).add(facing);
+            Direction newFacing = getMoveDirSafely(infrontLocation);
+            if(newFacing != null && rc.isCoreReady() && rc.canMove(newFacing)){
+                facing = newFacing;
+                    rc.move(newFacing);
+            }else{
                 turnFacing();
-            }
-            //Move not safe, try turning back and test if safe again
-            if(!safe){
-                facing = facing.opposite();
-                infrontLocation = rc.getLocation().add(facing);
-                safe = safetyCheck(infrontLocation);
-            }
-            if(rc.isCoreReady() && rc.canMove(facing) && safe){
-                rc.move(facing);
             }
             //else if(rc.isCoreReady() && rc.canMove(facing.opposite())){
             //    rc.move(facing.opposite());
             //}
         }
-
-        public void randomTurnFacing() {
-            if(rand.nextInt(20) < 1){
-                turnFacing();
-            }
-        }
+        //public void randomTurnFacing() {
+        //    if(rand.nextInt(20) < 1){
+        //        turnFacing();
+        //    }
+        //}
 
         public void turnFacing() {
             if(rand.nextInt(10) < 5){
@@ -519,9 +514,9 @@ public class RobotPlayer {
             int currentRoundNum = Clock.getRoundNum();
             if(currentRoundNum < 1200){
                 RobotInfo[] enemies = rc.senseNearbyRobots(NearBuilding,theirTeam);
-                if(enemies.length > 0){
-                    System.out.println(rc.getType().name() + "sensed enemy");
-                    //call soldiers to defend our HQ
+                int others_need_help = rc.readBroadcast(HelpNeedChannel);
+                if(enemies.length > 0 && others_need_help < currentRoundNum){
+                    //Enemy detected and nobody else calling for help, call soldiers to defend our HQ
                     rc.broadcast(SoldierRallyXChannel, enemies[0].location.x);
                     rc.broadcast(SoldierRallyYChannel, enemies[0].location.y);
                     rc.broadcast(HelpNeedChannel, currentRoundNum);
@@ -698,8 +693,8 @@ public class RobotPlayer {
                 }
             }
             MapLocation rallyPoint;
-
-            if (Clock.getRoundNum() < ChargeTurn) {
+            int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+            if (Clock.getRoundNum() < ChargeTurn && combatUnitNum < largeDroneNum) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
                 MapLocation[] myTowers = rc.senseTowerLocations();
@@ -712,6 +707,7 @@ public class RobotPlayer {
 	            }
 	            rallyPoint = closestTowerToEnemy;
             }else {
+
                 if (Clock.getRoundNum() == ChargeTurn){
                     countSoldiersAsCombatUnits();
                 }
@@ -727,7 +723,7 @@ public class RobotPlayer {
 	                MapLocation nearestEnemyTower = getNearestEnemyTower();
 
 	                if(nearestEnemyTower != null){
-                        int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
+
                         //Attack if we have enough combat units
                         //Less tanks are needed
                         if(combatUnitNum > largeDroneNum || (combatUnitNum > largeTankNum && strategy == TankS)){
@@ -793,13 +789,11 @@ public class RobotPlayer {
             autoAttack();
             int roundNum = Clock.getRoundNum();
             int barrack_num = rc.readBroadcast(BarracksNumChannel);
+            int heli_num = rc.readBroadcast(HelipadNumChannel);
             int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
-            //Build at least one barracks, counter drone rush
-            if(barrack_num == 0){
-            	boolean built = tryBuild(RobotType.BARRACKS);
-                if(built){
-                    rc.broadcast(BarracksNumChannel, barrack_num + 1);
-                }
+            //Build at least one barrack/helipad, counter drone rush
+            if(barrack_num == 0 && heli_num == 0){
+                buildEarlyBuildings(strategy, barrack_num, heli_num);
             } else if(minerfactory_num == 0){
             	boolean built = tryBuild(RobotType.MINERFACTORY);
                 if(built){
@@ -811,11 +805,8 @@ public class RobotPlayer {
                     if(built){
                         rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
                     }
-                }else if(barrack_num < 2 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
-                    boolean built = tryBuild(RobotType.BARRACKS);
-                    if(built){
-                        rc.broadcast(BarracksNumChannel, barrack_num + 1);
-                    }
+                }else if(barrack_num < 2 && heli_num < 2 && rc.getTeamOre() > RobotType.BARRACKS.oreCost){
+                    buildEarlyBuildings(strategy, barrack_num, heli_num);
                 }else{
                     boolean built = tryBuild(RobotType.MINERFACTORY);
                     if(built){
@@ -828,9 +819,22 @@ public class RobotPlayer {
             mineOrMove();
             rc.yield();
         }
-        
-        
-        
+
+        private void buildEarlyBuildings(int strategy, int barrack_num, int heli_num) throws GameActionException {
+            if(strategy == TankS){
+                boolean built = tryBuild(RobotType.BARRACKS);
+                if(built){
+                    rc.broadcast(BarracksNumChannel, barrack_num + 1);
+                }
+            }else if(strategy == DroneS){
+                boolean built = tryBuild(RobotType.HELIPAD);
+                if(built){
+                    rc.broadcast(HelipadNumChannel, heli_num + 1);
+                }
+            }
+        }
+
+
         public void executeStrategy(int strategy, int minerfactory_num) throws GameActionException{
             //Must build at least 2 miner factories to ensure ore income
             if(minerfactory_num < 2){
