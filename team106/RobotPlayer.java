@@ -20,7 +20,7 @@ public class RobotPlayer {
     //Turn to stop building barracks and miner factories
     //Start building strategy buildings
     private static int ExecuteStrategyTurn = 600;
-    private static int StopSoldierSpawnTurn = 700;
+    private static int StopSoldierSpawnTurn = 600;
     private static int StopMinerSpawnTurn = 800;
     private static int SpawnCommanderTurn = 850;
 
@@ -276,6 +276,10 @@ public class RobotPlayer {
         }
 
         public boolean tryBuild(RobotType type) throws GameActionException {
+            //Check the cost first
+            if(rc.getTeamOre() < type.oreCost){
+                return false;
+            }
             int closeDistance = rc.readBroadcast(CloseDistanceChannel);
             RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
             boolean buildingClash = false;
@@ -803,7 +807,7 @@ public class RobotPlayer {
                     }
                 }
             }else {
-            	executeStrategy(strategy);
+            	executeStrategy(strategy, minerfactory_num);
             }
             mineOrMove();
             rc.yield();
@@ -811,7 +815,11 @@ public class RobotPlayer {
         
         
         
-        public void executeStrategy(int strategy) throws GameActionException{
+        public void executeStrategy(int strategy, int minerfactory_num) throws GameActionException{
+            //Must build at least 2 miner factories to ensure ore income
+            if(minerfactory_num < 2){
+                boolean built = tryBuild(RobotType.MINERFACTORY);
+            }
         	if(Clock.getRoundNum() >= SpawnCommanderTurn){
                 //Late game
                 //Build high level units
