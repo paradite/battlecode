@@ -16,7 +16,6 @@ public class RobotPlayer {
      * Turn constants
      */
     private static int moveAwayFromHQTurn = 200;
-
     //Turn to stop building barracks and miner factories
     //Start building strategy buildings
     private static int ExecuteStrategyTurn = 600;
@@ -72,6 +71,11 @@ public class RobotPlayer {
     final static int TurnDiveder = 3;
     final static int MinerTurnRemainder = 0;
     final static int SoldierTurnRemainder = 1;
+
+    /**
+     * Distance constants
+     */
+    final static int NearHQ = 50;
 
     public static void run(RobotController rc) {
         BaseBot myself;
@@ -653,8 +657,8 @@ public class RobotPlayer {
         public void execute() throws GameActionException {
         	//ANTI-RUSH
         	//check for nearby enemies
-        	if(Clock.getRoundNum() < 1000){
-        		RobotInfo[] enemies = rc.senseNearbyRobots(35,theirTeam);
+        	if(Clock.getRoundNum() < 1200){
+        		RobotInfo[] enemies = rc.senseNearbyRobots(NearHQ,theirTeam);
         		if(enemies.length > 0){
         			//call soldiers to defend our HQ
         			rc.broadcast(SoldierRallyXChannel, enemies[0].location.x);
