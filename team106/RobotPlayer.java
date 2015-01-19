@@ -7,31 +7,31 @@ import java.util.*;
 public class RobotPlayer {
 
     /**
-     * Strategies
-     */
-    private static int TankS = 1;
+	 * Strategies
+	 */
+	private static int TankS = 1;
+
     private static int DroneS = 2;
 
     /**
-     * Turn constants
-     */
-    private static int moveAwayFromHQTurn = 300;
-    //Turn to stop building barracks and miner factories
-    //Start building strategy buildings
-    private static int ExecuteStrategyTurn = 600;
-    private static int StopSoldierSpawnTurn = 600;
-    private static int StopMinerSpawnTurn = 800;
-    private static int SpawnCommanderTurn = 850;
+	 * Turn constants
+	 */
+	private static int moveAwayFromHQTurn = 300;
+    // Turn to stop building barracks and miner factories
+	// Start building strategy buildings
+	private static int ExecuteStrategyTurn = 500;
+	private static int StopSoldierSpawnTurn = 500;
+	private static int StopMinerSpawnTurn = 800;
+	private static int SpawnCommanderTurn = 850;
 
     //The turn to attack if we have enough combat units
     static int ChargeTurn = 1300;
     static int SolderSurroundEndTurn = ChargeTurn - 200;
 
     //The turn to attack even if we don't have enough combat units
-    static int LastAttackTurn = 1500;
+    static int LastAttackTurn = 1700;
     //Miners attack in this turn
     static int MinerAttackTurn = 1700;
-
     /**
      * Unit limits
      */
@@ -62,9 +62,9 @@ public class RobotPlayer {
     /**
      * Unit number limits
      */
-    final static int tooManyUnits = 8;
+    final static int tooManyUnits = 12;
     final static int largeDroneNum = 80;
-    final static int largeTankNum = 60;
+    final static int largeTankNum = 40;
     final static int smallCombatUnitNum = 60;
 
     /**
@@ -120,6 +120,8 @@ public class RobotPlayer {
         protected MapLocation[] enemyTowers;
     	protected boolean hasRallied;
     	protected boolean hasCharged;
+        protected int currentRoundNum;
+        protected RobotInfo[] enemies;
 
         public BaseBot(RobotController rc) {
             this.rc = rc;
@@ -248,7 +250,7 @@ public class RobotPlayer {
         }
 
         public RobotInfo[] getEnemiesInAttackingRange() {
-            RobotInfo[] enemies = rc.senseNearbyRobots(rc.getType().attackRadiusSquared, theirTeam);
+            enemies = rc.senseNearbyRobots(rc.getType().attackRadiusSquared, theirTeam);
             return enemies;
         }
 
@@ -274,7 +276,7 @@ public class RobotPlayer {
         }
 
         public void autoAttack() throws GameActionException {
-            RobotInfo[] enemies = getEnemiesInAttackingRange();
+            enemies = getEnemiesInAttackingRange();
             if (enemies.length > 0) {
                 //attack!
                 if (rc.isWeaponReady()) {
@@ -324,7 +326,7 @@ public class RobotPlayer {
         public void mineOrMove() throws GameActionException {
             //Avoid concentrating around the HQ, encourage going further away
             //Allow near HQ in early game, only use this later in the game
-            if(Clock.getRoundNum() > moveAwayFromHQTurn && rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
+            if(currentRoundNum > moveAwayFromHQTurn && rc.getLocation().distanceSquaredTo(getMyHQ()) < rc.readBroadcast(CloseDistanceChannel)){
                 if(rc.isCoreReady() && rc.senseOre(rc.getLocation())>15 && rc.canMine() && rand.nextInt(10) < 2){
                     rc.mine();
                 }else{
@@ -408,7 +410,7 @@ public class RobotPlayer {
 
         public void combatUnitActions() throws GameActionException {
             if (rc.isCoreReady()) {
-                int currentRoundNum = Clock.getRoundNum();
+                currentRoundNum = Clock.getRoundNum();
                 int needhelp = rc.readBroadcast(HelpNeedChannel);
                 if(needhelp == currentRoundNum || needhelp == currentRoundNum - 1){
                     //Our buildings under attack, go back
@@ -434,7 +436,7 @@ public class RobotPlayer {
                     //Then after 50 turns, attack HQ
                     if(rallyX == theirHQ.x && rallyY == theirHQ.y){
                         int actualAttackTurn = rc.readBroadcast(ActualAttackTurnChannel);
-                        if(Clock.getRoundNum() < (actualAttackTurn + 50)){
+                        if(currentRoundNum < (actualAttackTurn + 50)){
                             //Surround the HQ first
                             newDir = getMoveDirSafely(rallyPoint);
                         }else{
@@ -511,7 +513,7 @@ public class RobotPlayer {
         }
 
         public void senseNearbyEnemyCallHelp() throws GameActionException {
-            int currentRoundNum = Clock.getRoundNum();
+            currentRoundNum = Clock.getRoundNum();
             if(currentRoundNum < 1200){
                 RobotInfo[] enemies = rc.senseNearbyRobots(NearBuilding,theirTeam);
                 int others_need_help = rc.readBroadcast(HelpNeedChannel);
@@ -604,7 +606,7 @@ public class RobotPlayer {
             //System.out.println("TowerThreat: "+towerThreat);
             //System.out.println("mapRatio: "+mapRatio);
 
-    		if(mapRatio < 0.92){
+    		if(mapRatio < 0.72){
     			//too many void squares, build drones to attack
     			strategy = DroneS;
     		} else{
@@ -678,7 +680,7 @@ public class RobotPlayer {
         	//ANTI-RUSH
         	//check for nearby enemies
             senseNearbyEnemyCallHelp();
-
+            currentRoundNum = Clock.getRoundNum();
 
             //Tell the other units the close distance to HQ
             //This is used to encourage units to move away from HQ to avoid congestion
@@ -686,7 +688,7 @@ public class RobotPlayer {
             int numBeavers = rc.readBroadcast(BeaverNumChannel);
 
             //Limit the number of beavers by only spawning them at certain turns
-            if (numBeavers < maxBeavers && Clock.getRoundNum()%50 == 0) {
+            if (numBeavers < maxBeavers && currentRoundNum%50 == 0) {
                 boolean spawned = trySpawn(RobotType.BEAVER);
                 if(spawned){
                     rc.broadcast(BeaverNumChannel, numBeavers + 1);
@@ -694,7 +696,7 @@ public class RobotPlayer {
             }
             MapLocation rallyPoint;
             int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-            if (Clock.getRoundNum() < ChargeTurn && combatUnitNum < largeDroneNum) {
+            if (currentRoundNum < ChargeTurn && combatUnitNum < largeDroneNum) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
                 MapLocation[] myTowers = rc.senseTowerLocations();
@@ -708,7 +710,7 @@ public class RobotPlayer {
 	            rallyPoint = closestTowerToEnemy;
             }else {
 
-                if (Clock.getRoundNum() == ChargeTurn){
+                if (currentRoundNum == ChargeTurn){
                     countSoldiersAsCombatUnits();
                 }
             	if(strategy == 0){
@@ -726,10 +728,10 @@ public class RobotPlayer {
 
                         //Attack if we have enough combat units
                         //Less tanks are needed
-                        if(combatUnitNum > largeDroneNum || (combatUnitNum > largeTankNum && strategy == TankS)){
+                        if(combatUnitNum > largeDroneNum || (combatUnitNum > largeTankNum && strategy == TankS || currentRoundNum > LastAttackTurn)){
                             //Report the turn of attack if not set yet
                             if(rc.readBroadcast(ActualAttackTurnChannel) == 0){
-                                rc.broadcast(ActualAttackTurnChannel, Clock.getRoundNum());
+                                rc.broadcast(ActualAttackTurnChannel, currentRoundNum);
                             }
                             //Attack towers if low tower threat
                             if(towerThreat < 30){
@@ -739,9 +741,9 @@ public class RobotPlayer {
                             }
                         }
                         //Defend own HQ if we do not have enough combat units to take down any towers
-                        else if(Clock.getRoundNum() > LastAttackTurn){
-                            rallyPoint = myHQ;
-                        }
+                        //else if(Clock.getRoundNum() > LastAttackTurn){
+                        //    rallyPoint = myHQ;
+                        //}
                         //Default rally point
                         else{
                             rallyPoint = closestTowerToEnemy;
@@ -787,7 +789,7 @@ public class RobotPlayer {
         	int strategy = rc.readBroadcast(100);
         	
             autoAttack();
-            int roundNum = Clock.getRoundNum();
+            currentRoundNum = Clock.getRoundNum();
             int barrack_num = rc.readBroadcast(BarracksNumChannel);
             int heli_num = rc.readBroadcast(HelipadNumChannel);
             int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
@@ -799,7 +801,7 @@ public class RobotPlayer {
                 if(built){
                     rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
                 }
-            }else if(Clock.getRoundNum() < ExecuteStrategyTurn){
+            }else if(currentRoundNum < ExecuteStrategyTurn){
                 if(minerfactory_num < 2){
                     boolean built = tryBuild(RobotType.MINERFACTORY);
                     if(built){
@@ -843,7 +845,7 @@ public class RobotPlayer {
                     rc.broadcast(MinerFactoryNumChannel, minerfactory_num + 1);
                 }
             }
-        	if(Clock.getRoundNum() >= SpawnCommanderTurn){
+        	if(currentRoundNum >= SpawnCommanderTurn){
                 //Late game
                 //Build high level units
         		if(rc.checkDependencyProgress(RobotType.TECHNOLOGYINSTITUTE) == DependencyProgress.NONE){
@@ -869,7 +871,7 @@ public class RobotPlayer {
             switch (strategy){
             case 0:
             case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.1){
-                        if(Clock.getRoundNum()%2 == 0){
+                        if(currentRoundNum%2 == 0){
                             tryBuild(RobotType.TANKFACTORY);
                         }else{
                             tryBuild(RobotType.SUPPLYDEPOT);
@@ -877,14 +879,14 @@ public class RobotPlayer {
                       }
                     break;
             case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.1){
-                        if(Clock.getRoundNum()%2 == 0){
+                        if(currentRoundNum%2 == 0){
                             tryBuild(RobotType.HELIPAD);
                         }else{
                             tryBuild(RobotType.SUPPLYDEPOT);
                         }
                       }
                     break;
-            default:if(Clock.getRoundNum()%2 == 0){
+            default:if(currentRoundNum%2 == 0){
                         tryBuild(RobotType.BARRACKS);
                     }else{
                         tryBuild(RobotType.SUPPLYDEPOT);
@@ -907,9 +909,9 @@ public class RobotPlayer {
             senseNearbyEnemyCallHelp();
 
             int numMiners = rc.readBroadcast(MinerNumChannel);
-            int roundNum = Clock.getRoundNum();
+            currentRoundNum = Clock.getRoundNum();
             //Allow spawning of other units by alternating turn number
-            if(roundNum < StopMinerSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && roundNum%TurnDiveder == MinerTurnRemainder){
+            if(currentRoundNum < StopMinerSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && currentRoundNum%TurnDiveder == MinerTurnRemainder){
                 boolean spawned = trySpawn(RobotType.MINER);
                 if(spawned){
                     rc.broadcast(MinerNumChannel, numMiners + 1);
@@ -936,7 +938,8 @@ public class RobotPlayer {
 
         public void execute() throws GameActionException {
             autoAttack();
-            if(Clock.getRoundNum() > MinerAttackTurn){
+            currentRoundNum = Clock.getRoundNum();
+            if(currentRoundNum > MinerAttackTurn){
                 combatUnitActions();
             }else{
                 mineOrMove();
@@ -953,8 +956,8 @@ public class RobotPlayer {
             super(rc);
         }
         public void execute() throws GameActionException {
-            int roundNum = Clock.getRoundNum();
-            if(roundNum < StopSoldierSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && roundNum%TurnDiveder == SoldierTurnRemainder){
+            currentRoundNum = Clock.getRoundNum();
+            if(currentRoundNum < StopSoldierSpawnTurn && rc.getTeamOre() > MinerSoldierThreshold && currentRoundNum%TurnDiveder == SoldierTurnRemainder){
                 trySpawn(RobotType.SOLDIER);
             }else{
                 if(rc.getTeamOre()>RobotType.TANKFACTORY.oreCost*2){
