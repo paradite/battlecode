@@ -10,7 +10,6 @@ public class RobotPlayer {
 	 * Strategies
 	 */
 	private static int TankS = 1;
-
     private static int DroneS = 2;
 
     /**
@@ -37,8 +36,6 @@ public class RobotPlayer {
      */
     private static int MaxMiner = 60;
     private static int maxBeavers = 15;
-    static Random rand;
-    static Direction facing;
 
     static Direction[] directions = {Direction.NORTH, Direction.NORTH_EAST, Direction.EAST, Direction.SOUTH_EAST, Direction.SOUTH, Direction.SOUTH_WEST, Direction.WEST, Direction.NORTH_WEST};
 
@@ -83,8 +80,6 @@ public class RobotPlayer {
 
     public static void run(RobotController rc) {
         BaseBot myself;
-        rand = new Random(rc.getID());
-        facing = getRandomDirection();
         if (rc.getType() == RobotType.HQ) {
             myself = new HQ(rc);
         } else if (rc.getType() == RobotType.BEAVER) {
@@ -122,6 +117,9 @@ public class RobotPlayer {
     	protected boolean hasCharged;
         protected int currentRoundNum;
         protected RobotInfo[] enemies;
+        protected int strategy;
+        protected Random rand;
+        protected Direction facing;
 
         public BaseBot(RobotController rc) {
             this.rc = rc;
@@ -132,6 +130,8 @@ public class RobotPlayer {
             this.enemyTowers = rc.senseEnemyTowerLocations();
             this.hasRallied = false;
             this.hasCharged = false;
+            rand = new Random(rc.getID());
+            facing = getRandomDirection();
         }
 
         public MapLocation getMyHQ() {
@@ -140,19 +140,10 @@ public class RobotPlayer {
 
         public Direction[] getDirectionsToward(MapLocation dest) {
             Direction toDest = rc.getLocation().directionTo(dest);
-            if(new Random(rc.getID()).nextInt(20) > 9){
-            	//favour left
-	            Direction[] dirs = {toDest,
-	                    toDest.rotateLeft(), toDest.rotateRight(),
-	                    toDest.rotateLeft().rotateLeft(), toDest.rotateRight().rotateRight()};
-	            return dirs;
-            } else{
-            	//favour right
-            	 Direction[] dirs = {toDest,
-                         toDest.rotateRight(), toDest.rotateLeft(),
-                         toDest.rotateRight().rotateRight(), toDest.rotateLeft().rotateLeft()};
-            	 return dirs;
-            }
+            Direction[] dirs = {toDest,
+                    toDest.rotateLeft(), toDest.rotateRight(),
+                    toDest.rotateLeft().rotateLeft(), toDest.rotateRight().rotateRight()};
+            return dirs;
         }
 
         //Avoid towers and enemy HQ when moving to a destination
@@ -290,22 +281,21 @@ public class RobotPlayer {
             if(rc.getTeamOre() < type.oreCost){
                 return false;
             }
+            Direction newDir = getBuildDirection(type);
+            MapLocation buildingLoc;
+            if(newDir == null){
+                buildingLoc = null;
+            }else{
+                buildingLoc = rc.getLocation().add(newDir);
+            }
             int closeDistance = rc.readBroadcast(CloseDistanceChannel);
             RobotInfo[] nearbyAllies = rc.senseNearbyRobots(closeDistance/2, myTeam);
-            boolean buildingClash = false;
             //Avoid building minefactory together
-            if(type == RobotType.MINERFACTORY){
-                for(RobotInfo m:nearbyAllies){
-                    if(m.type == type){
-                        buildingClash = true;
-                        break;
-                    }
-                }
-            }
-            if(buildingClash){
+            //Avoid building near obstacles
+            if(checkBuildingClash(type, nearbyAllies) || checkBuildingNearWall(buildingLoc)){
                 mineOrMove();
-            //Avoid building around the HQ (UNLESS IT IS THE ANTI DRONE RUSH MACHINE) and causing congestion, encourage going further away
             }
+            //Avoid building around the HQ (UNLESS IT IS THE ANTI DRONE RUSH MACHINE) and causing congestion, encourage going further away
             //else if(rc.getLocation().distanceSquaredTo(getMyHQ()) < closeDistance && type != RobotType.BARRACKS){
             //    mineOrMove();
             ////Avoid building around too many other units to avoid congestion
@@ -313,11 +303,35 @@ public class RobotPlayer {
             else if(nearbyAllies.length > tooManyUnits){
                 mineOrMove();
             }else if(rc.isCoreReady() && rc.getTeamOre() > type.oreCost){
-                Direction newDir = getBuildDirection(type);
                 if (newDir != null) {
                     rc.build(newDir, type);
                     System.out.println("Type: " + type.name());
                     return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean checkBuildingNearWall(MapLocation buildingLoc) {
+            if(buildingLoc == null){
+                return false;
+            }
+            MapLocation nearbyLoc;
+            for(Direction d:directions){
+                nearbyLoc = buildingLoc.add(d);
+                if(rc.senseTerrainTile(nearbyLoc) != TerrainTile.NORMAL){
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean checkBuildingClash(RobotType type, RobotInfo[] nearbyAllies) {
+            if(type == RobotType.MINERFACTORY){
+                for(RobotInfo m:nearbyAllies){
+                    if(m.type == type){
+                        return true;
+                    }
                 }
             }
             return false;
@@ -349,6 +363,9 @@ public class RobotPlayer {
         //Move infront, using get direction with location two grids ahead
         public void moveRandom() throws GameActionException {
             //randomTurnFacing();
+            if(facing == null){
+                facing = getRandomDirection();
+            }
             MapLocation infrontLocation = rc.getLocation().add(facing).add(facing);
             Direction newFacing = getMoveDirSafely(infrontLocation);
             if(newFacing != null && rc.isCoreReady() && rc.canMove(newFacing)){
@@ -376,7 +393,7 @@ public class RobotPlayer {
         }
 
         public MapLocation getNearestEnemyTower() throws GameActionException {
-            MapLocation[] enemyTowers = rc.senseEnemyTowerLocations();
+            enemyTowers = rc.senseEnemyTowerLocations();
             if(enemyTowers.length > 0){
                 int nearestDis = 99999;
                 MapLocation nearestTower = enemyTowers[0];
@@ -416,14 +433,17 @@ public class RobotPlayer {
                     //Our buildings under attack, go back
                     int x = rc.readBroadcast(SoldierRallyXChannel);
                     int y = rc.readBroadcast(SoldierRallyYChannel);
-                    Direction enemy = getMoveDirAvoidTowers(new MapLocation(x, y));
-                    if(enemy!=null)
-                        rc.move(enemy);
+                    facing = getMoveDirAvoidTowers(new MapLocation(x, y));
+                    if(facing!=null){
+                        rc.move(facing);
+                    }else{
+                        moveRandom();
+                    }
                 }else if(rc.getType() == RobotType.SOLDIER && currentRoundNum < SolderSurroundEndTurn) {
                     //Buildings are safe, soldiers destroy their base
-                    Direction HQDir = getMoveDirSafely(theirHQ);
-                    if (HQDir != null && !this.hasRallied) {
-                        rc.move(HQDir);
+                    facing = getMoveDirSafely(theirHQ);
+                    if (facing != null && !this.hasRallied) {
+                        rc.move(facing);
                     } else {
                         moveRandom();
                     }
@@ -431,28 +451,31 @@ public class RobotPlayer {
                     int rallyX = rc.readBroadcast(0);
                     int rallyY = rc.readBroadcast(1);
                     MapLocation rallyPoint = new MapLocation(rallyX, rallyY);
-                    Direction newDir;
                     //If moving to HQ, then avoid towers and sorround HQ fisrt
                     //Then after 50 turns, attack HQ
                     if(rallyX == theirHQ.x && rallyY == theirHQ.y){
                         int actualAttackTurn = rc.readBroadcast(ActualAttackTurnChannel);
                         if(currentRoundNum < (actualAttackTurn + 50)){
                             //Surround the HQ first
-                            newDir = getMoveDirSafely(rallyPoint);
+                            facing = getMoveDirSafely(rallyPoint);
                         }else{
                             //Attack HQ directly
-                            newDir = getMoveDir(rallyPoint);
+                            facing = getMoveDir(rallyPoint);
                         }
                     }else{
-                        newDir = getMoveDir(rallyPoint);
+                        facing = getMoveDir(rallyPoint);
                     }
-                    if (newDir != null) {
-                        rc.move(newDir);
+                    if (facing != null) {
+                        rc.move(facing);
                     }else{
                         moveRandom();
                     }
                 }
             }
+        }
+
+        protected Direction getRandomDirection() {
+            return directions[rand.nextInt(8)];
         }
 
         public void beginningOfTurn() {
@@ -573,8 +596,6 @@ public class RobotPlayer {
         public static int towerThreat;
         public static boolean isFinished;
         
-        public static int strategy; //0 is defend, 1 is attack (with tanks), 2 is attack (with drones)
-        
         public static double mapRatio;
         public static int mapSize;
 
@@ -606,6 +627,7 @@ public class RobotPlayer {
             //System.out.println("TowerThreat: "+towerThreat);
             //System.out.println("mapRatio: "+mapRatio);
 
+            //0 is defend, 1 is attack (with tanks), 2 is attack (with drones)
     		if(mapRatio < 0.72){
     			//too many void squares, build drones to attack
     			strategy = DroneS;
@@ -656,16 +678,16 @@ public class RobotPlayer {
         	if(Clock.getBytecodesLeft() < 1000){
 				return false;
 			}
-        	MapLocation[] towers = rc.senseEnemyTowerLocations();
+        	enemyTowers = rc.senseEnemyTowerLocations();
             towerThreat = 0;
 
-            for (int i=0; i<towers.length; ++i) {
-                MapLocation towerLoc = towers[i];
+            for (int i=0; i<enemyTowers.length; ++i) {
+                MapLocation towerLoc = enemyTowers[i];
 
                 //Modified formula for ranged units, 50 --> 25
                 if ((xMin <= towerLoc.x && towerLoc.x <= xMax && yMin <= towerLoc.y && towerLoc.y <= yMax) || towerLoc.distanceSquaredTo(this.theirHQ) <= 50) {
-                    for (int j=0; j<towers.length; ++j) {
-                        if (towers[j].distanceSquaredTo(towerLoc) <= 25) {
+                    for (int j=0; j<enemyTowers.length; ++j) {
+                        if (enemyTowers[j].distanceSquaredTo(towerLoc) <= 25) {
                             towerThreat++;
                         }
                     }
@@ -786,7 +808,7 @@ public class RobotPlayer {
         }
 
         public void execute() throws GameActionException {
-        	int strategy = rc.readBroadcast(100);
+        	strategy = rc.readBroadcast(100);
         	
             autoAttack();
             currentRoundNum = Clock.getRoundNum();
@@ -987,8 +1009,6 @@ public class RobotPlayer {
     }
 
 
-    private static Direction getRandomDirection() {
-        return directions[rand.nextInt(8)];
-    }
+
 
 }
