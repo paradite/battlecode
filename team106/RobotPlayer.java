@@ -121,6 +121,7 @@ public class RobotPlayer {
         protected int strategy;
         protected Random rand;
         protected Direction facing;
+        protected int stuck_count;
 
         public BaseBot(RobotController rc) {
             this.rc = rc;
@@ -133,6 +134,7 @@ public class RobotPlayer {
             this.hasCharged = false;
             rand = new Random(rc.getID());
             facing = getRandomDirection();
+            stuck_count = 0;
         }
 
         public MapLocation getMyHQ() {
@@ -430,7 +432,11 @@ public class RobotPlayer {
             if (rc.isCoreReady()) {
                 currentRoundNum = Clock.getRoundNum();
                 int needhelp = rc.readBroadcast(HelpNeedChannel);
-                if(needhelp == currentRoundNum || needhelp == currentRoundNum - 1){
+                if(stuck_count > 0){
+                    //Already stuck, move randomly
+                    moveRandom();
+                    stuck_count--;
+                }else if(needhelp == currentRoundNum || needhelp == currentRoundNum - 1){
                     //Our buildings under attack, go back
                     int x = rc.readBroadcast(SoldierRallyXChannel);
                     int y = rc.readBroadcast(SoldierRallyYChannel);
@@ -438,7 +444,7 @@ public class RobotPlayer {
                     if(facing!=null){
                         rc.move(facing);
                     }else{
-                        moveRandom();
+                        stuckResolver();
                     }
                 }else if(rc.getType() == RobotType.SOLDIER && currentRoundNum < SolderSurroundEndTurn) {
                     //Buildings are safe, soldiers destroy their base
@@ -465,14 +471,20 @@ public class RobotPlayer {
                         }
                     }else{
                         facing = getMoveDir(rallyPoint);
-                    }
-                    if (facing != null) {
+                    }if (facing != null) {
                         rc.move(facing);
                     }else{
-                        moveRandom();
+                        stuckResolver();
                     }
                 }
             }
+        }
+
+        private void stuckResolver() throws GameActionException {
+            //Stuck somewhere, force random movement for 10 rounds
+            stuck_count+= 10;
+            System.out.println("Unit stuck, force moving around");
+            moveRandom();
         }
 
         protected Direction getRandomDirection() {
