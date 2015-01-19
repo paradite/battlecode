@@ -18,8 +18,8 @@ public class RobotPlayer {
 	private static int moveAwayFromHQTurn = 300;
     // Turn to stop building barracks and miner factories
 	// Start building strategy buildings
-	private static int ExecuteStrategyTurn = 500;
-	private static int StopSoldierSpawnTurn = 500;
+	private static int ExecuteStrategyTurn = 300;
+	private static int StopSoldierSpawnTurn = 300;
 	private static int StopMinerSpawnTurn = 800;
 	private static int SpawnCommanderTurn = 850;
 
@@ -47,6 +47,7 @@ public class RobotPlayer {
     final static int BarracksNumChannel = 5;
     final static int MinerFactoryNumChannel = 6;
     final static int HelipadNumChannel = 7;
+    final static int TankFactoryNumChannel = 8;
     final static int StrategyNumChannel = 100;
     final static int CloseDistanceChannel = 99;
     final static int CombatUnitNumChannel = 98;
@@ -710,7 +711,7 @@ public class RobotPlayer {
             int numBeavers = rc.readBroadcast(BeaverNumChannel);
 
             //Limit the number of beavers by only spawning them at certain turns
-            if (numBeavers < maxBeavers && currentRoundNum%50 == 0) {
+            if (numBeavers < maxBeavers && currentRoundNum%80 == 0) {
                 boolean spawned = trySpawn(RobotType.BEAVER);
                 if(spawned){
                     rc.broadcast(BeaverNumChannel, numBeavers + 1);
@@ -718,7 +719,7 @@ public class RobotPlayer {
             }
             MapLocation rallyPoint;
             int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
-            if (currentRoundNum < ChargeTurn && combatUnitNum < largeDroneNum) {
+            if (combatUnitNum < getLargeNumber()) {
                 rallyPoint = new MapLocation( (this.myHQ.x + this.theirHQ.x) / 2,
                         (this.myHQ.y + this.theirHQ.y) / 2);
                 MapLocation[] myTowers = rc.senseTowerLocations();
@@ -731,7 +732,6 @@ public class RobotPlayer {
 	            }
 	            rallyPoint = closestTowerToEnemy;
             }else {
-
                 if (currentRoundNum == ChargeTurn){
                     countSoldiersAsCombatUnits();
                 }
@@ -747,10 +747,9 @@ public class RobotPlayer {
 	                MapLocation nearestEnemyTower = getNearestEnemyTower();
 
 	                if(nearestEnemyTower != null){
-
                         //Attack if we have enough combat units
                         //Less tanks are needed
-                        if(combatUnitNum > largeDroneNum || (combatUnitNum > largeTankNum && strategy == TankS || currentRoundNum > LastAttackTurn)){
+                        if(combatUnitNum > getLargeNumber() || currentRoundNum > LastAttackTurn){
                             //Report the turn of attack if not set yet
                             if(rc.readBroadcast(ActualAttackTurnChannel) == 0){
                                 rc.broadcast(ActualAttackTurnChannel, currentRoundNum);
@@ -785,6 +784,14 @@ public class RobotPlayer {
             rc.yield();
         }
 
+        private int getLargeNumber() {
+            if(strategy == DroneS){
+                return largeDroneNum;
+            }else{
+                return largeTankNum;
+            }
+        }
+
         private void countSoldiersAsCombatUnits() throws GameActionException {
             int soldierCount = 0;
             int combatUnitNum = rc.readBroadcast(CombatUnitNumChannel);
@@ -803,6 +810,11 @@ public class RobotPlayer {
      * BEAVER
      */
     public static class Beaver extends BaseBot {
+
+        int barrack_num;
+        int heli_num;
+        int minerfactory_num;
+        int tankfactory_num;
         public Beaver(RobotController rc) {
             super(rc);
         }
@@ -812,9 +824,10 @@ public class RobotPlayer {
         	
             autoAttack();
             currentRoundNum = Clock.getRoundNum();
-            int barrack_num = rc.readBroadcast(BarracksNumChannel);
-            int heli_num = rc.readBroadcast(HelipadNumChannel);
-            int minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
+            barrack_num = rc.readBroadcast(BarracksNumChannel);
+            heli_num = rc.readBroadcast(HelipadNumChannel);
+            minerfactory_num = rc.readBroadcast(MinerFactoryNumChannel);
+            tankfactory_num = rc.readBroadcast(TankFactoryNumChannel);
             //Build at least one barrack/helipad, counter drone rush
             if(barrack_num == 0 && heli_num == 0){
                 buildEarlyBuildings(strategy, barrack_num, heli_num);
@@ -892,16 +905,28 @@ public class RobotPlayer {
         private void midGameBuildings(int strategy) throws GameActionException {
             switch (strategy){
             case 0:
-            case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost*1.1){
-                        if(currentRoundNum%2 == 0){
+            case 1:	if(rc.getTeamOre() > RobotType.TANKFACTORY.oreCost){
+                        //Ensure at least one tank factory first
+                        if(tankfactory_num < 1){
+                            boolean built = tryBuild(RobotType.TANKFACTORY);
+                            if(built){
+                                rc.broadcast(TankFactoryNumChannel, tankfactory_num + 1);
+                            }
+                        }else if(currentRoundNum%2 == 0){
                             tryBuild(RobotType.TANKFACTORY);
                         }else{
                             tryBuild(RobotType.SUPPLYDEPOT);
                         }
                       }
                     break;
-            case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost*1.1){
-                        if(currentRoundNum%2 == 0){
+            case 2:if(rc.getTeamOre() > RobotType.HELIPAD.oreCost){
+                        //Ensure at least one helipad first
+                        if(heli_num < 1){
+                            boolean built = tryBuild(RobotType.HELIPAD);
+                            if(built){
+                                rc.broadcast(HelipadNumChannel, heli_num + 1);
+                            }
+                        }else if(currentRoundNum%2 == 0){
                             tryBuild(RobotType.HELIPAD);
                         }else{
                             tryBuild(RobotType.SUPPLYDEPOT);
